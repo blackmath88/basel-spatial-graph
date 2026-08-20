@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence
+from typing import Dict, Iterator, List, Optional, Sequence
 
 import networkx as nx
 
 from ..errors import SpatialGraphUnavailableError, UnknownEntityError
-from .schema import NODE_TYPES, RELATION_TYPES
 
 FORMAT_VERSION = 1
 # Nothing may return more than this in one call, whatever the caller asks for.

@@ -99,6 +99,44 @@ is what makes `/accessibility/compare` a table rather than three special cases.
 Mode-specific detail lives in mode-specific fields — `network` for the street modes, `transit` and
 `journey` for transit — so a client can read the common part and ignore the rest.
 
+## Two products, one pipeline
+
+Everything above builds the **reference application**: the 15-Minute Basel map and its APIs. A
+second track now reads the same prepared artefacts and does something different with them.
+
+```text
+prepared caches
+  basel_walking_network.graphml  ┐
+  basel_cycling_network.graphml  │
+  basel_entities.json            ├──> reference application  ──> /accessibility, the map
+  basel_services.json            │      routing engines           "what can I reach from here?"
+  basel_transit.npz              │
+  basel_population.json          │
+                                 └──> Spatial Graph Core    ──> /spatial-graph/*
+                                        typed heterogeneous      "how do these things relate,
+                                        graph + query layer       and what does that imply?"
+                                              │
+                                              └── calls the routing engines for
+                                                  anything parameterised by mode/time
+```
+
+The Spatial Graph Core is deliberately *additional*. It does not replace the routing structures and
+does not copy them — see [SPATIAL_GRAPH.md](SPATIAL_GRAPH.md). Its own module layout:
+
+```text
+app/spatial_graph/
+  schema.py       node types, relation types, operators, analyses — machine-readable
+  model.py        NetworkXSpatialGraph + the four-method store interface
+  builder.py      builds the typed graph from prepared artefacts
+  query.py        the bounded query language: parse, validate, execute
+  analysis.py     the bridge to the routing engines, memoized
+  provenance.py   observed / official / derived / dynamic
+  questions.py    the standing cross-domain questions
+  export.py       CSV and Cypher, for Neo4j / DuckDB / pandas
+  cli.py          query it without FastAPI or a map
+  fixtures.py     a fully synthetic graph, for tests
+```
+
 ## Where the service logic lives
 
 - `app/service_model.py` — `ServiceCategory` enum, `ServiceLocation`, labels, colours, the six
@@ -141,6 +179,11 @@ snapping is chunked, so attaching a thousand services never allocates a hundred-
 | Step | Cost |
 |---|---|
 | `prepare_data` (cold, everything incl. the 224 MB GTFS download) | ~4 min |
+| `prepare_spatial_graph` (from prepared artefacts) | ~1.3 s |
+| Spatial graph load at startup (4,034 nodes, 4.3 MB JSON) | ~0.04 s |
+| Structural graph query (no routing) | ~1 ms |
+| Query with a live accessibility constraint, 21 neighbourhoods | ~35 ms |
+| A standing question across all neighbourhoods and three modes | ~6 s |
 | `prepare_data` (cold, GTFS archive already downloaded) | ~90 s |
 | `prepare_data` (warm, all caches valid) | ~15 s |
 | Server startup (five caches, index builds, stop + entity attach) | ~1.8 s |

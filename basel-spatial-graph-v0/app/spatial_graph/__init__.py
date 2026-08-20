@@ -16,7 +16,7 @@ from typing import Dict, Optional
 from ..config import SPATIAL_GRAPH_CACHE
 from ..errors import SpatialGraphUnavailableError
 from .analysis import AccessibilityAnalysis
-from .builder import ORIGIN_METHOD, SpatialGraphBuilder, build_spatial_graph
+from .builder import ORIGIN_METHOD, build_spatial_graph
 from .model import MAX_RESULTS, NetworkXSpatialGraph, SpatialGraphStore, public_node
 from .provenance import entity_provenance, query_provenance, relation_provenance
 from .query import QueryEngine, QuerySpec

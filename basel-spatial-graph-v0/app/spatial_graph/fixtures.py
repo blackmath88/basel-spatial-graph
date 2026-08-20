@@ -7,8 +7,6 @@ structure without any prepared artefact or network access.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from ..accessibility import CyclingAccessibilityService, WalkingAccessibilityService
 from ..fixtures import fixture_records
 from ..graph import build_graph

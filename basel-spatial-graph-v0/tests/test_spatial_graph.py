@@ -15,9 +15,9 @@ from app.errors import (
     UnknownRelationError,
 )
 from app.main import app
-from app.spatial_graph import NetworkXSpatialGraph, QueryEngine, QuerySpec, describe_schema
-from app.spatial_graph.fixtures import fixture_graph, fixture_service
-from app.spatial_graph.schema import ANALYSIS_TYPES, NODE_TYPES, RELATION_TYPES
+from app.spatial_graph import NetworkXSpatialGraph, QuerySpec, describe_schema
+from app.spatial_graph.fixtures import fixture_service
+from app.spatial_graph.schema import NODE_TYPES, RELATION_TYPES
 
 
 @pytest.fixture(scope="module")
@@ -480,6 +480,11 @@ def test_query_results_explain_themselves(service):
 
     provenance = result["provenance"]
     assert provenance["datasets"]
+    # A query touching only Neighborhood still credits the population dataset,
+    # because `children` and friends are denormalized onto that node.
+    denormalized = [d for d in provenance["datasets"] if "denormalized" in d["for"]]
+    assert denormalized, "the source of the denormalized population fields must be named"
+    assert "children" in denormalized[0]["fields"]
     assert provenance["relations_traversed"][0]["persisted"] is True
     assert provenance["analyses"][0]["classification"] == "dynamic"
     assert provenance["origin_method"]

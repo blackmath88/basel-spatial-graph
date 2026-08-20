@@ -15,7 +15,7 @@ inspect the code — a report, a colleague, or later an agent.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from .schema import RELATION_TYPES
 
@@ -63,9 +63,43 @@ def entity_provenance(node: dict) -> dict:
     }
 
 
+# Fields denormalized onto a node type from a *different* dataset, so that a
+# query touching only `Neighborhood` still credits the source of `children`.
+DENORMALIZED_FROM = {
+    "Neighborhood": [("population", ["population_total", "children", "young",
+                                     "working_age", "elderly", "elderly_80_plus",
+                                     "child_share", "elderly_share", "reference_year"])],
+}
+
+
 def datasets_used(graph, types: List[str]) -> List[dict]:
-    """One row per distinct dataset behind the node types a query touched."""
+    """One row per distinct dataset behind the node types a query touched.
+
+    Includes datasets whose values are denormalized onto another type: the child
+    population lives on `Neighborhood`, but it came from the population dataset
+    and that has to be visible in the answer.
+    """
     seen, rows = set(), []
+    sources = (graph.metadata or {}).get("sources", {})
+    for node_type in types:
+        for source_key, fields in DENORMALIZED_FROM.get(node_type, []):
+            provenance = sources.get(source_key) or {}
+            key = (provenance.get("source"), provenance.get("dataset"))
+            if key == (None, None) or key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                "for": f"{node_type} (denormalized fields)",
+                "fields": fields,
+                "source": provenance.get("source"),
+                "dataset": provenance.get("dataset"),
+                "dataset_title": provenance.get("dataset_title"),
+                "source_url": provenance.get("source_url"),
+                "license": provenance.get("license"),
+                "retrieved_at": provenance.get("retrieved_at"),
+                "reference_year": (graph.metadata or {}).get("population_reference_year"),
+                "age_group_definitions": provenance.get("age_group_definitions"),
+            })
     for node_type in types:
         for node in graph.nodes_of_type(node_type):
             provenance = node.get("provenance") or {}

@@ -11,5 +11,9 @@ data/raw/gtfs/
 data/processed/*.json
 data/processed/*.graphml
 data/processed/*.npz
+
+# Derived experiment output — regenerate with the scripts in experiments/
+experiments/export/
+experiments/city2graph_data/
 !data/raw/.gitkeep
 !data/processed/.gitkeep

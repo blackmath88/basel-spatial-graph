@@ -13,15 +13,14 @@ and a cross-domain question is a job for this one.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional
 
 import numpy as np
 from shapely.geometry import Point, shape
 from shapely.strtree import STRtree
 
-from ..service_model import CATEGORY_LABELS, ESSENTIAL_CATEGORIES, ServiceCategory, category_label
+from ..service_model import ESSENTIAL_CATEGORIES, ServiceCategory, category_label
 from .model import NetworkXSpatialGraph
-from .schema import NODE_TYPES
 
 # How a neighbourhood's accessibility origin is chosen. Stated in every result
 # that depends on it, because a naive centroid can land in a river.

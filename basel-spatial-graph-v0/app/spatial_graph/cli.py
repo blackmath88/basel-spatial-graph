@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from ..errors import BaselGraphError
 
@@ -103,6 +102,11 @@ def main(argv=None) -> int:
     query = add("query", "run a query specification file (or - for stdin)")
     query.add_argument("path")
 
+    export = add("export", "write CSV / Cypher for Neo4j, DuckDB or pandas")
+    export.add_argument("out", help="output directory")
+    export.add_argument("--format", choices=["csv", "cypher", "both"], default="both")
+    export.add_argument("--geometry", action="store_true")
+
     ask = add("ask", "run one of the standing questions")
     ask.add_argument("question", nargs="?", default=None)
     ask.add_argument("--category", default=None)
@@ -145,7 +149,25 @@ def _dispatch(service, args):
         return service.entity(args.type, args.id, include_geometry=args.geometry)
     if command == "neighbors":
         return service.neighbors(args.type, args.id, relation=args.relation, limit=args.limit)
+    if command == "export":
+        from pathlib import Path
+
+        from .export import schema_cypher, to_cypher, to_csv
+
+        out = Path(args.out)
+        result = {}
+        if args.format in {"csv", "both"}:
+            result["csv"] = to_csv(service.graph, out, include_geometry=args.geometry)
+        if args.format in {"cypher", "both"}:
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "schema.cypher").write_text(schema_cypher(), encoding="utf-8")
+            path = to_cypher(service.graph, out / "graph.cypher", include_geometry=args.geometry)
+            result["cypher"] = {"graph": path.name, "schema": "schema.cypher",
+                                "bytes": path.stat().st_size}
+        return result
     if command == "query":
+        from pathlib import Path
+
         text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text(encoding="utf-8")
         return service.query(json.loads(text))
     if command == "ask":

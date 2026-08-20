@@ -20,12 +20,40 @@ categories reachable  6/6         6/6                6/6
 ```
 
 ```text
-V0    GIS graph                          ✅
-V0.2  Real walking network               ✅
-V0.3  15-minute services                 ✅
-V0.4  Walking + Cycling + Transit        ✅
-V0.5  City-wide accessibility          next
+Reference application — the 15-Minute Basel map
+  V0    GIS graph                        ✅
+  V0.2  Real walking network             ✅
+  V0.3  15-minute services               ✅
+  V0.4  Walking + Cycling + Transit      ✅
+
+Spatial Graph Core — the same data, relationally queryable
+  P1    Heterogeneous Basel graph        ✅
+  P2    Structured query API             ✅ (started here)
+  P3    MCP adapter                      later
+  P4    Natural-language planning        later
 ```
+
+The map is now one client among several. There is a second way in: a typed
+heterogeneous graph of 4,034 Basel entities that answers cross-domain questions
+without rendering anything.
+
+```bash
+python -m app.spatial_graph.cli ask q6_children_underserved --table
+```
+
+```text
+Which neighbourhoods with many children have below-median access to both
+pharmacies and public transport?
+
+  name          children   child_share   pharmacies   nearest   transit stops
+  St. Alban         2237         17.5%            1    12.0 min             5
+  Bruderholz        1994         20.5%            1     4.7 min            11
+  Hirzbrunnen       1914         19.1%            2     8.7 min            14
+```
+
+Official population statistics, structural graph relations and a live routing
+computation, in one answer that states which part came from where. See
+[docs/SPATIAL_GRAPH.md](docs/SPATIAL_GRAPH.md).
 
 ## Quick start
 
@@ -39,6 +67,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 python -m app.prepare_data          # downloads and caches everything (~4 min, once)
+                                    # …and builds the spatial graph at the end
 
 uvicorn app.main:app --reload
 ```
@@ -202,6 +231,8 @@ Basel entities and several service categories come from the official
 | `data/raw/gtfs/gtfs_ch.zip` | The 224 MB Swiss GTFS archive, kept so a re-extract need not re-download | `prepare_data` |
 | `data/processed/basel_services.json` | 1,308 normalized services **with a walk and a bike access node, snap distance and quality each** | `prepare_data` |
 | `data/processed/basel_entities.json` | Normalized areas / schools / accidents | `prepare_data` |
+| `data/processed/basel_population.json` | Neighbourhood population by age group, 10 years, from data.bs.ch `100128` | `prepare_data` |
+| `data/processed/basel_spatial_graph.json` | The heterogeneous typed graph: 4,034 nodes, 14,092 edges (4.3 MB) | `prepare_spatial_graph` |
 | `data/processed/data_quality.json` | Generated counts, missing names, bad snaps, duplicates, warnings | `prepare_data` |
 | `data/raw/osmnx_cache/` | OSMnx's raw Overpass responses, so a `--refresh` is cheap | OSMnx |
 | `data/raw/*.json` | Raw Basel Open Data responses, for inspection | `prepare_data` |
@@ -218,6 +249,8 @@ python -m app.prepare_data --network-only     # just the two street networks
 python -m app.prepare_data --services-only    # just the service POIs
 python -m app.prepare_data --entities-only    # just the Basel entity datasets
 python -m app.prepare_data --transit-only     # just the timetable
+python -m app.prepare_data --population-only # just the demographic data
+python -m app.prepare_spatial_graph          # just the heterogeneous graph (~1.3 s)
 
 BASEL_GRAPH_FIXTURE=1 uvicorn app.main:app --reload       # synthetic everything, fully offline
 BASEL_SERVICE_SOURCE=fixture uvicorn app.main:app         # synthetic services, real streets
@@ -297,6 +330,37 @@ curl 'http://127.0.0.1:8000/analysis/accessibility-gaps?category=pharmacy&minute
 curl 'http://127.0.0.1:8000/health'
 curl 'http://127.0.0.1:8000/data/status'
 ```
+
+### Spatial Graph Core
+
+```bash
+# discover the graph rather than being told about it
+curl 'http://127.0.0.1:8000/spatial-graph/schema'
+curl 'http://127.0.0.1:8000/spatial-graph/entity-types'
+
+# a bounded relational query: demographics + structure + live routing
+curl -X POST 'http://127.0.0.1:8000/spatial-graph/query' \
+     -H 'Content-Type: application/json' \
+     -d @examples/queries/children_pharmacy_transit.json
+
+# the standing cross-domain questions
+curl 'http://127.0.0.1:8000/spatial-graph/questions'
+curl 'http://127.0.0.1:8000/spatial-graph/questions/q1_poorest_access?category=pharmacy'
+
+# where any number came from
+curl 'http://127.0.0.1:8000/spatial-graph/provenance/LOCATED_IN'
+```
+
+Or without the server at all:
+
+```bash
+python -m app.spatial_graph.cli describe
+python -m app.spatial_graph.cli ask q4_category_inequality --table
+python -m app.spatial_graph.cli query examples/queries/elderly_healthcare_gap.json
+python -m app.spatial_graph.cli export experiments/export   # CSV + Cypher
+```
+
+Grammar and operators: [docs/QUERY_API.md](docs/QUERY_API.md).
 
 Response (abbreviated):
 
@@ -415,12 +479,17 @@ cut short by the Rhine, the rail corridor and the motorway. Each category's near
 pytest
 ```
 
-270 tests, all deterministic and fully offline — the suite blocks socket connections outright and
+342 tests, all deterministic and fully offline — the suite blocks socket connections outright and
 routes over tiny hand-built graphs and a four-stop synthetic timetable, so it never depends on
 OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 
 ## Known limitations
 
+- **The spatial graph works at neighbourhood scale.** Every accessibility figure
+  stands for a whole Wohnviertel from one representative origin, and nothing is
+  population-weighted because the population data is not finer than that.
+- **The query language has no GROUP BY** — aggregating across rows still needs
+  code. It is the clearest known gap.
 - **Cycling is a prototype cost model**: `distance ÷ 15 km/h`. No slope, traffic stress, cycle-lane
   preference, surface, turn penalties or one-way rules — Bruderholz is a real climb and the model
   does not know. See [docs/CYCLING.md](docs/CYCLING.md).
@@ -452,7 +521,10 @@ OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 
 ## Documentation
 
-[Concept](docs/CONCEPT.md) · [Architecture](docs/ARCHITECTURE.md) ·
+**Reference application** — [Concept](docs/CONCEPT.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Accessibility model](docs/ACCESSIBILITY.md) · [Services](docs/SERVICES.md) ·
-[Cycling](docs/CYCLING.md) · [Transit](docs/TRANSIT.md) · [Data & provenance](docs/DATA.md) ·
+[Cycling](docs/CYCLING.md) · [Transit](docs/TRANSIT.md) · [Data & provenance](docs/DATA.md)
+
+**Spatial Graph Core** — [Concept](docs/SPATIAL_GRAPH_MCP_CONCEPT.md) ·
+[The graph](docs/SPATIAL_GRAPH.md) · [Query API](docs/QUERY_API.md) ·
 [City2Graph evaluation](docs/CITY2GRAPH.md)

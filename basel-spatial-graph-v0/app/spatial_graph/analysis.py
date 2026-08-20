@@ -15,7 +15,7 @@ from typing import Dict, Optional
 
 from ..errors import QuerySpecError
 from ..modes import TravelMode, mode_label, parse_mode
-from ..service_model import ServiceCategory, parse_category
+from ..service_model import parse_category
 
 # Every accessibility figure this module produces is a live computation, not a
 # stored fact. Results say so.

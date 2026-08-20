@@ -102,6 +102,22 @@ possible duplicate pairs within 25 m. The current run raises 13 warnings — amo
 outside the walking network (regional museums in Germany, France and Baselland listed by the Basel
 Info dataset) and 34 school pairs at the same address.
 
+## Neighbourhood population — LIVE
+
+| | |
+|---|---|
+| Source | data.bs.ch `100128` — *Wohnbevölkerung nach Geschlecht, Alter, Staatsangehörigkeit und Wohnviertel* |
+| Licence | Open Government Data Basel-Stadt (CC BY 3.0 CH) |
+| Unit | Wohnviertel (all 21, including Riehen and Bettingen) |
+| Years | 2016–2025 prepared of 49 available (1974–2025) |
+| Size | 210 observations · canton total 210,529 in 2025 |
+| Cache | `data/processed/basel_population.json` |
+
+Resident population by *single year of age*, aggregated server-side into six documented groups:
+`total`, `children` (0–17), `young` (0–19), `working_age` (20–64), `elderly` (65+),
+`elderly_80_plus`. `young` and `elderly` match the cantonal Jugend-/Altersquotient definitions on
+purpose. Nothing is estimated or interpolated. See [the spatial graph guide](SPATIAL_GRAPH.md).
+
 ## Fixtures and failures
 
 `app/fixtures.py` holds synthetic entities. `street_sources/fixture_source.py` holds a synthetic 7×5 grid
@@ -110,8 +126,9 @@ with a deliberate barrier crossed on only two rows — it makes "nearby but not 
 every essential category (and one deliberately unnamed park). The bicycle fixture grid covers the same
 positions but crosses the barrier and uses its own node ids, so nothing can silently route cycling over
 the pedestrian graph. `transit_sources/fixture_source.py` holds a four-stop timetable with weekday,
-weekend and after-midnight services and one calendar exception. All of them exist for deterministic
-tests and offline demos only.
+weekend and after-midnight services and one calendar exception. `app/population.py` holds a
+hand-written population table, and `spatial_graph/fixtures.py` assembles all of them into a fully
+synthetic heterogeneous graph. All of them exist for deterministic tests and offline demos only.
 
 Fallback is always explicit and always reported:
 
