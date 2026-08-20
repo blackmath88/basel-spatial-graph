@@ -2,7 +2,12 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+.DS_Store
+
+# Prepared data caches — rebuild with `python -m app.prepare_data`
 data/raw/*.json
+data/raw/osmnx_cache/
 data/processed/*.json
+data/processed/*.graphml
 !data/raw/.gitkeep
 !data/processed/.gitkeep
