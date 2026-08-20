@@ -1,0 +1,12 @@
+const map=new maplibregl.Map({container:'map',style:'https://demotiles.maplibre.org/style.json',center:[7.59,47.559],zoom:12.7});
+const visible={areas:true,schools:true,accidents:true};
+const cache={};
+async function get(url){const r=await fetch(url);if(!r.ok)throw new Error(await r.text());return r.json()}
+function fc(rows){return {type:'FeatureCollection',features:rows.map(r=>({type:'Feature',id:r.id,geometry:r.geometry,properties:{id:r.id,name:r.name,type:r.type}}))}}
+async function addLayer(kind,type,color){const rows=await get('/entities/'+kind);cache[kind]=rows;map.addSource(kind,{type:'geojson',data:fc(rows)});if(type==='fill'){map.addLayer({id:kind,type:'fill',source:kind,paint:{'fill-color':color,'fill-opacity':.18,'fill-outline-color':color}})}else{map.addLayer({id:kind,type:'circle',source:kind,paint:{'circle-radius':type==='school'?7:4,'circle-color':color,'circle-stroke-width':1,'circle-stroke-color':'#fff'}})}map.on('click',kind,e=>inspect(e.features[0].properties.id));map.on('mouseenter',kind,()=>map.getCanvas().style.cursor='pointer');map.on('mouseleave',kind,()=>map.getCanvas().style.cursor='')}
+map.on('load',async()=>{await addLayer('areas','fill','#5b8cff');await addLayer('accidents','accident','#ff5e5e');await addLayer('schools','school','#ffca4b');const h=await get('/health');document.getElementById('status').textContent=`${h.data_mode} · ${h.nodes} nodes · ${h.edges} edges`});
+function toggle(k){visible[k]=!visible[k];map.setLayoutProperty(k,'visibility',visible[k]?'visible':'none')}
+async function inspect(id){const g=await get('/graph/neighbors/'+encodeURIComponent(id));const n=g.nodes.find(x=>x.id===id);const edges=g.edges.map(e=>`<div class=edge><b>${e.type}</b><br><span class=muted>${e.source} → ${e.target}${e.distance_m?` · ${e.distance_m} m`:''}</span></div>`).join('')||'<span class=muted>No graph relations</span>';document.getElementById('inspect').innerHTML=`<b>${n.name}</b><p class=muted>${n.type} · ${n.id}</p>${edges}<details><summary>Provenance & properties</summary><pre>${escapeHtml(JSON.stringify({provenance:n.provenance,properties:n.properties},null,2))}</pre></details>`;zoomTo(n.geometry)}
+function zoomTo(g){if(g.type==='Point')map.easeTo({center:g.coordinates,zoom:15});}
+async function analysis(url){const x=await get(url);const r=document.getElementById('results');r.style.display='block';r.innerHTML=`<b>Analysis result</b><pre>${escapeHtml(JSON.stringify(x.slice(0,20),null,2))}</pre>`}
+function escapeHtml(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
