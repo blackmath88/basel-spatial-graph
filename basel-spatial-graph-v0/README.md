@@ -1,68 +1,65 @@
-# Basel Spatial Graph
+# 15-Minute Basel Spatial Graph
 
-**Make GIS relational.** A runnable V0 showing how public Basel GIS layers can become a typed graph, queried through an API and inspected on a map.
+V0.2 answers a concrete question: **what can I actually reach by walking through Basel's street network?** Click a map origin, choose 5, 10, or 15 minutes, and see routed street segments, an approximate visual boundary, and reachable schools.
 
-## What V0 does
+## Run
 
-- Tries to fetch official Basel-Stadt Open Data datasets:
-  - `100042` statistical neighborhoods
-  - `100029` school locations
-  - `100120` geocoded traffic accidents
-- Normalizes them into three entity types: `Area`, `School`, `Accident`.
-- Derives relations: `IN_AREA`, `ADJACENT_TO`, `NEAR`.
-- Builds an in-memory NetworkX graph.
-- Exposes FastAPI endpoints.
-- Serves a MapLibre browser UI for inspection and two simple graph analyses.
-- Falls back to an explicitly synthetic fixture when live data cannot be fetched or parsed.
-
-## Run it
-
-Requires Python 3.11+.
+Requires Python 3.9+.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000>.
+Open <http://127.0.0.1:8000>; API documentation is at <http://127.0.0.1:8000/docs>.
 
-API docs: <http://127.0.0.1:8000/docs>
-
-Force the built-in demo fixture:
+On its first normal start, the app tries official Basel entity datasets and an OpenStreetMap walking-network query. Successful OSM data is cached at `data/processed/basel_walk_network.json`. If either source is unavailable, `/health` and the UI clearly report fixture mode. For an immediate deterministic demo:
 
 ```bash
 BASEL_GRAPH_FIXTURE=1 uvicorn app.main:app --reload
 ```
 
-Windows PowerShell:
+## API examples
 
-```powershell
-$env:BASEL_GRAPH_FIXTURE="1"
-uvicorn app.main:app --reload
+```bash
+curl 'http://127.0.0.1:8000/accessibility/walk?lat=47.559&lon=7.59&minutes=15'
+curl 'http://127.0.0.1:8000/accessibility/walk?lat=47.559&lon=7.59&minutes=5&walking_speed_kmh=4.8'
+curl 'http://127.0.0.1:8000/entities/schools/school%3A1/accessibility?mode=walk&minutes=10'
 ```
 
 ## Test
 
 ```bash
-pytest
+BASEL_GRAPH_FIXTURE=1 pytest
 ```
 
-## Why this architecture?
+The tests use a tiny deterministic walking graph and do not depend on network services.
 
-The graph complements GIS; it does not replace it. Geometry remains attached to nodes while relationships become reusable first-class objects. See `docs/CONCEPT.md` and `docs/ARCHITECTURE.md`.
+## What V0.2 contains
 
-## Current limitations
+- Basel `Area`, `School`, and `Accident` entities and the earlier `IN_AREA`, `ADJACENT_TO`, and straight-line `NEAR` relations.
+- A separately sourced pedestrian street graph with `StreetNode` nodes and length-weighted `WALKABLE_TO` edges.
+- Persistent `ACCESS_POINT` links from point entities to their nearest walking-network node.
+- Dynamic Dijkstra reachability; no large set of persistent `REACHABLE` edges.
+- Sorted reachable schools with network distance and walking time.
+- Area intersection summaries and Euclidean-versus-network distance comparisons.
+- Reachable street GeoJSON plus a clearly labeled approximate buffered boundary.
+- Full source and analytical provenance in each response.
 
-- Live Basel adapters are intentionally tolerant because public dataset schemas may evolve. Inspect `/health` to see whether `live` or `fixture` mode is active.
-- `NEAR` currently uses straight-line haversine distance, not a walking street network.
-- Accident download is capped at 1,000 records in V0.
-- The frontend uses MapLibre assets and a demo basemap from the internet.
-- No PostGIS, graph database, GTFS, LLM or GNN yet.
+See [the accessibility guide](docs/ACCESSIBILITY.md), [architecture](docs/ARCHITECTURE.md), and [data notes](docs/DATA.md).
 
-## Best next steps
+## Known limitations
 
-1. Harden the three Basel adapters against the current official schemas and add cached snapshots.
-2. Add a street network and replace straight-line proximity with network accessibility.
-3. Add the structured `/query` endpoint that becomes the stable contract for later AI/MCP clients.
+- The OSM query treats eligible roads as undirected and filters obvious non-walking highways/access restrictions. It does not yet model every directional or conditional pedestrian rule.
+- Origins and entities snap to the nearest node, not the nearest point along an edge; the API reports snap distance.
+- The translucent boundary is a degree-based display buffer, not a precise polygon isochrone. Reachable street segments are the authoritative result.
+- Areas are listed when a reachable segment intersects their polygon. No population estimate is made because the current normalized data does not support one defensibly.
+- MapLibre and its demo basemap load from the internet.
+
+## Next three steps (not part of V0.2)
+
+1. Add essential-service POIs such as groceries, pharmacies, and parks.
+2. Add GTFS transit and Walk → Ride → Walk journeys.
+3. Compare neighborhood-level 15-minute accessibility with defensible population indicators.

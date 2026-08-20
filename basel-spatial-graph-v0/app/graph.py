@@ -48,6 +48,18 @@ def build_graph(data, near_school_m=500):
                 g.add_edge(accident["id"],school["id"],type="NEAR",distance_m=round(d,1),provenance={"derived":True,"method":"haversine","threshold_m":near_school_m})
     return g
 
+def connect_street_access(g, streets):
+    """Materialize stable entity-to-network attachment, never dynamic reachability."""
+    for street_id, data in streets.graph.nodes(data=True):
+        g.add_node(f"street:{street_id}", **data, geometry={"type":"Point","coordinates":[data["lon"],data["lat"]]}, provenance=streets.provenance)
+    for node_id, data in list(g.nodes(data=True)):
+        if data.get("type") not in {"School", "Accident"} or data.get("geometry", {}).get("type") != "Point":
+            continue
+        lon, lat = data["geometry"]["coordinates"]
+        street_id, distance = streets.nearest_node(lat, lon)
+        g.add_edge(node_id, f"street:{street_id}", type="ACCESS_POINT", distance_m=round(distance, 1), provenance={"derived":True,"method":"nearest walking-network node"})
+    return g
+
 def node_payload(g,node_id):
     d=dict(g.nodes[node_id]); d["id"]=node_id; return d
 

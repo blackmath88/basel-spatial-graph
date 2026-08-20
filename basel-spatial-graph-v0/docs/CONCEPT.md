@@ -1,24 +1,16 @@
 # Concept
 
-## Thesis
+Traditional proximity asks “how close is it in a straight line?” Walking accessibility asks “how far is it through streets and paths I can use?” A river, railway, fenced site, or sparse crossing can make those answers very different.
 
-GIS answers **where** very well. A spatial graph adds a reusable model for **how things relate**.
-
-Instead of repeatedly combining layers for every analysis, relationships such as containment, adjacency, proximity, reachability and dependency become typed edges with provenance.
-
-V0 deliberately asks only one question: can ordinary Basel public GIS data become an inspectable relational object that is useful through both a map and an API?
-
-## V0 model
+The model now has two complementary layers:
 
 ```text
-School   --IN_AREA--> Area
-Accident --IN_AREA--> Area
-Accident --NEAR-----> School
-Area     --ADJACENT_TO--> Area
+School   --IN_AREA------> Area
+Accident --NEAR---------> School       (Euclidean, retained and labeled)
+School   --ACCESS_POINT-> StreetNode
+StreetNode --WALKABLE_TO-> StreetNode  (weighted by metres)
 ```
 
-Every node keeps geometry. Every derived edge records how it was calculated.
+An isochrone is the set of places reachable within a travel-time budget. V0.2's authoritative isochrone is the returned collection of reachable street segments. Its translucent polygon is only a narrow buffered visualization of those segments, deliberately avoiding claims of parcel-level precision.
 
-## Long-term direction
-
-A Spatial Graph API above GIS infrastructure, usable by GIS analysts, conventional apps and constrained AI agents. LLMs should translate intent and explain results; deterministic GIS/graph code remains the source of spatial truth.
+Official and community source observations remain distinguishable from derived relations and per-request analytical results through provenance metadata. Deterministic geometry and graph algorithms remain the source of spatial truth.

@@ -4,12 +4,17 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from .config import STATIC_DIR
 from .ingest import load_data
-from .graph import build_graph, node_payload, neighbors, subgraph
+from .graph import build_graph, centroid_coords, connect_street_access, node_payload, neighbors, subgraph
+from .street import load_street_network
+from .accessibility import WalkingAccessibilityService
 
 DATA=load_data(force_fixture=os.getenv("BASEL_GRAPH_FIXTURE","0")=="1")
 GRAPH=build_graph(DATA)
+STREETS=load_street_network(force_fixture=os.getenv("BASEL_GRAPH_FIXTURE","0")=="1")
+ACCESSIBILITY=WalkingAccessibilityService(STREETS, GRAPH)
+connect_street_access(GRAPH, STREETS)
 
-app=FastAPI(title="Basel Spatial Graph",version="0.1.0")
+app=FastAPI(title="15-Minute Basel Spatial Graph",version="0.2.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/")
@@ -17,7 +22,21 @@ def root(): return FileResponse(STATIC_DIR/"index.html")
 
 @app.get("/health")
 def health():
-    return {"ok":True,"data_mode":DATA.get("mode"),"fallback_reason":DATA.get("fallback_reason"),"nodes":GRAPH.number_of_nodes(),"edges":GRAPH.number_of_edges()}
+    return {"ok":True,"data_mode":DATA.get("mode"),"fallback_reason":DATA.get("fallback_reason"),"street_network_mode":STREETS.provenance["mode"],"street_fallback_reason":STREETS.fallback_reason,"nodes":GRAPH.number_of_nodes(),"edges":GRAPH.number_of_edges(),"street_nodes":STREETS.graph.number_of_nodes(),"street_edges":STREETS.graph.number_of_edges()}
+
+@app.get("/accessibility/walk")
+def walking_accessibility(lat:float=Query(...,ge=-90,le=90), lon:float=Query(...,ge=-180,le=180), minutes:float=Query(15,gt=0,le=60), walking_speed_kmh:float=Query(4.8,gt=0,le=12)):
+    return ACCESSIBILITY.calculate(lat,lon,minutes,walking_speed_kmh)
+
+@app.get("/entities/{entity_type}/{entity_id:path}/accessibility")
+def entity_accessibility(entity_type:str, entity_id:str, mode:str="walk", minutes:float=Query(15,gt=0,le=60), walking_speed_kmh:float=Query(4.8,gt=0,le=12)):
+    if mode != "walk": raise HTTPException(400,"Only walking mode is available in V0.2")
+    if entity_id not in GRAPH: raise HTTPException(404,"Entity not found")
+    geometry=GRAPH.nodes[entity_id].get("geometry",{})
+    if geometry.get("type")=="Point": lon,lat=geometry["coordinates"]
+    else:
+        lon,lat=centroid_coords(geometry)
+    return ACCESSIBILITY.calculate(lat,lon,minutes,walking_speed_kmh)
 
 @app.get("/entities/{entity_type}")
 def entities(entity_type:str):
