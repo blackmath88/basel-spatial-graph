@@ -8,15 +8,22 @@ computed too, but only ever returned as a labelled comparison.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
 import networkx as nx
 from shapely.geometry import Point, mapping, shape
 from shapely.ops import unary_union
 
 from .config import DEFAULT_WALKING_SPEED_KMH, NETWORK_BUFFER_M
-from .errors import EmptyNetworkError, InvalidCoordinateError
+from .errors import (
+    EmptyNetworkError,
+    InvalidCoordinateError,
+    UnknownServiceError,
+    UnroutableServiceError,
+)
 from .projection import project_geometry, to_metric
+from .service_index import ServiceIndex
+from .service_model import ServiceCategory
 from .street_sources import StreetNetwork
 
 # GeoJSON output precision: ~0.1 m, well beyond what OSM geometry supports.
@@ -48,10 +55,12 @@ class WalkingAccessibilityService:
         self,
         streets: StreetNetwork,
         entity_graph: Optional[nx.MultiDiGraph] = None,
+        services: Optional[ServiceIndex] = None,
         buffer_m: float = NETWORK_BUFFER_M,
     ):
         self.streets = streets
         self.entity_graph = entity_graph if entity_graph is not None else nx.MultiDiGraph()
+        self.services = services if services is not None else ServiceIndex([])
         self.buffer_m = buffer_m
         self._entity_access = {}
         self._components = {}
@@ -97,6 +106,11 @@ class WalkingAccessibilityService:
         speed_kmh: float = DEFAULT_WALKING_SPEED_KMH,
         include_straight_line: bool = True,
         include_buffer: bool = False,
+        categories: Optional[Sequence[ServiceCategory]] = None,
+        include_services: bool = True,
+        include_service_items: bool = True,
+        service_limit: Optional[int] = None,
+        include_geometry: bool = True,
     ) -> dict:
         minutes = self._positive(minutes, "minutes")
         speed_kmh = self._positive(speed_kmh, "walking_speed_kmh")
@@ -114,20 +128,30 @@ class WalkingAccessibilityService:
         component_index, component_size = self._components.get(origin_node, (None, 1))
 
         features = []
-        for u, v, data in edges:
-            feature = self.streets.edge_feature(u, v, data)
-            feature["geometry"] = _round_geometry(feature["geometry"])
-            feature["properties"]["kind"] = "reachable_edge"
-            features.append(feature)
-        if include_buffer:
-            boundary = self._network_buffer(geoms)
-            if boundary is not None:
-                features.append(boundary)
-        if include_straight_line:
-            features.append(self._straight_line_circle(lon, lat, budget))
+        if include_geometry:
+            for u, v, data in edges:
+                feature = self.streets.edge_feature(u, v, data)
+                feature["geometry"] = _round_geometry(feature["geometry"])
+                feature["properties"]["kind"] = "reachable_edge"
+                features.append(feature)
+            if include_buffer:
+                boundary = self._network_buffer(geoms)
+                if boundary is not None:
+                    features.append(boundary)
+            if include_straight_line:
+                features.append(self._straight_line_circle(lon, lat, budget))
 
-        schools, accident_count = self._reachable_entities(costs, budget, speed_kmh)
-        areas = self._reachable_areas(geoms)
+        if include_services:
+            reachable_services = self.services.reachable(
+                costs, budget, speed_kmh, categories=categories,
+                include_items=include_service_items, limit=service_limit,
+            )
+        else:
+            reachable_services = {}
+        completeness = ServiceIndex.completeness(reachable_services) if include_services else None
+
+        accident_count = self._reachable_accidents(costs, budget)
+        areas = self._reachable_areas(geoms) if include_geometry else []
 
         notes = []
         if not edges:
@@ -162,13 +186,13 @@ class WalkingAccessibilityService:
                 "max_network_distance_m": round(max(costs.values(), default=0.0), 1),
             },
             "geometry": {"type": "FeatureCollection", "features": features},
+            "reachable_services": reachable_services,
+            "completeness": completeness,
             "reachable_entities": {
-                "schools": schools,
-                "school_count": len(schools),
                 "accident_count": accident_count,
                 "areas": areas,
             },
-            "euclidean_vs_network": self._comparisons(lon, lat, schools),
+            "euclidean_vs_network": self._comparisons(lon, lat, reachable_services),
             "notes": notes,
             "provenance": {
                 "network_source": self.streets.source_name,
@@ -182,6 +206,81 @@ class WalkingAccessibilityService:
                 "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "network": self.streets.provenance,
                 "fallback_reason": self.streets.fallback_reason,
+                "services_mode": self.services.mode,
+                "services_fallback_reason": self.services.fallback_reason,
+            },
+        }
+
+    def route_to_service(self, lat: float, lon: float, service_id: str,
+                         speed_kmh: float = DEFAULT_WALKING_SPEED_KMH) -> dict:
+        """The shortest walking path from a clicked origin to one service.
+
+        Same graph, same weights as the reachability query, so the reported
+        distance always agrees with the profile.
+        """
+        speed_kmh = self._positive(speed_kmh, "walking_speed_kmh")
+        service = self.services.get(service_id)
+        if service is None:
+            raise UnknownServiceError(f"No prepared service with id '{service_id}'.")
+        if not service.is_routable:
+            raise UnroutableServiceError(
+                f"'{service.display_name}' is {service.access_distance_m:.0f} m from the nearest "
+                "walkable street and is not attached to the network."
+                if service.access_distance_m is not None else
+                f"'{service.display_name}' is not attached to the walking network.",
+                service_id=service_id, access_quality=service.access_quality,
+            )
+        origin_node, snap_m = self.streets.nearest_node(lat, lon)
+        try:
+            path = nx.shortest_path(self.streets.graph, origin_node, service.access_node_id,
+                                    weight="length_m")
+        except nx.NetworkXNoPath:
+            raise UnroutableServiceError(
+                f"No walking route from here to '{service.display_name}'; they are in "
+                "disconnected parts of the network.",
+                service_id=service_id,
+            )
+        lines, network_distance = [], 0.0
+        for u, v in zip(path, path[1:]):
+            data = self.streets.graph[u][v]
+            lines.append(data["geom"])
+            network_distance += data["length_m"]
+        total = network_distance + service.access_distance_m
+        metres_per_minute = speed_kmh * 1000.0 / 60.0
+        features = []
+        if lines:
+            features.append({
+                "type": "Feature",
+                "geometry": _round_geometry(mapping(unary_union(lines))),
+                "properties": {"kind": "route", "length_m": round(network_distance, 1)},
+            })
+        node = self.streets.graph.nodes[service.access_node_id]
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [
+                [round(node["lon"], 6), round(node["lat"], 6)],
+                [round(service.lon, 6), round(service.lat, 6)],
+            ]},
+            "properties": {"kind": "route_connector",
+                           "length_m": round(service.access_distance_m, 1)},
+        })
+        return {
+            "origin": {"lat": round(float(lat), 6), "lon": round(float(lon), 6)},
+            "snapped_origin": {"node_id": origin_node, "snap_distance_m": round(snap_m, 1)},
+            "service": service.summary(),
+            "walking_speed_kmh": speed_kmh,
+            "network_distance_m": round(network_distance, 1),
+            "walking_distance_m": round(total, 1),
+            "walking_time_minutes": round(total / metres_per_minute, 1),
+            "node_count": len(path),
+            "geometry": {"type": "FeatureCollection", "features": features},
+            "provenance": {
+                "algorithm": "NetworkX Dijkstra shortest path",
+                "edge_weight": "length_m",
+                "distance_crs": self.streets.provenance.get("metric_crs"),
+                "network_source": self.streets.source_name,
+                "mode": self.streets.mode,
+                "service": service.provenance,
             },
         }
 
@@ -251,29 +350,17 @@ class WalkingAccessibilityService:
             },
         }
 
-    def _reachable_entities(self, costs, budget, speed_kmh):
-        schools, accidents = [], 0
-        metres_per_minute = speed_kmh * 1000.0 / 60.0
+    def _reachable_accidents(self, costs, budget):
+        """Accidents stay context, not a destination category."""
+        count = 0
         for entity_id, (access_node, connector) in self._entity_access.items():
             if access_node not in costs:
                 continue
-            distance = costs[access_node] + connector
-            if distance > budget:
+            if costs[access_node] + connector > budget:
                 continue
-            entity = self.entity_graph.nodes[entity_id]
-            if entity.get("type") == "Accident":
-                accidents += 1
-                continue
-            schools.append({
-                "id": entity_id,
-                "name": entity.get("name"),
-                "network_distance_m": round(distance, 1),
-                "travel_time_minutes": round(distance / metres_per_minute, 1),
-                "snap_distance_m": round(connector, 1),
-                "geometry": entity.get("geometry"),
-            })
-        schools.sort(key=lambda row: row["network_distance_m"])
-        return schools, accidents
+            if self.entity_graph.nodes[entity_id].get("type") == "Accident":
+                count += 1
+        return count
 
     def _reachable_areas(self, geoms):
         if not geoms:
@@ -294,21 +381,25 @@ class WalkingAccessibilityService:
                 continue
         return areas
 
-    def _comparisons(self, lon, lat, schools):
+    def _comparisons(self, lon, lat, reachable_services):
+        """Nearest service per category: how much longer is the walk than the crow's flight?"""
         from .graph import haversine_m
 
         rows = []
-        for school in schools:
-            geometry = school.get("geometry") or {}
-            if geometry.get("type") != "Point":
+        for category, row in reachable_services.items():
+            service = self.services.get(row.get("nearest_id")) if row.get("nearest_id") else None
+            if service is None:
                 continue
-            slon, slat = geometry["coordinates"]
-            euclidean = haversine_m((lon, lat), (slon, slat))
+            euclidean = haversine_m((lon, lat), (service.lon, service.lat))
+            network = row["nearest_distance_m"]
             rows.append({
-                "id": school["id"],
-                "name": school["name"],
+                "category": category,
+                "label": row["label"],
+                "id": service.id,
+                "name": service.display_name,
                 "euclidean_distance_m": round(euclidean, 1),
-                "network_distance_m": school["network_distance_m"],
-                "network_detour_factor": round(school["network_distance_m"] / euclidean, 2) if euclidean else 1.0,
+                "network_distance_m": network,
+                "network_detour_factor": round(network / euclidean, 2) if euclidean else 1.0,
             })
+        rows.sort(key=lambda r: r["category"])
         return rows

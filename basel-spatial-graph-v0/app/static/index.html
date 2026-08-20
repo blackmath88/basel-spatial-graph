@@ -3,49 +3,81 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>15-Minute Basel — walking network</title>
+<title>15-Minute Basel</title>
 <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet">
 <style>
 *{box-sizing:border-box}
 body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:#0d0f12;color:#e8e9ea}
 header{height:58px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid #262b31}
 header b{font-size:17px}header small{display:block;color:#8d98a5}
-#status{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px}
-.badge{border:1px solid #343c46;border-radius:99px;padding:3px 9px;color:#9ba5b1;background:#15191e}
+#status{margin-left:auto;display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap;justify-content:flex-end}
+.badge{border:1px solid #343c46;border-radius:99px;padding:3px 9px;color:#9ba5b1;background:#15191e;white-space:nowrap}
 .badge.live{color:#5ce39a;border-color:#256b4b}
 .badge.fixture{color:#ffb454;border-color:#7a5320}
-main{height:calc(100vh - 58px);display:grid;grid-template-columns:1fr 380px}
+main{height:calc(100vh - 58px);display:grid;grid-template-columns:1fr 400px}
 #map{height:100%}
 .panel{overflow:auto;border-left:1px solid #262b31;padding:16px}
 .card{background:#15191e;border:1px solid #292f36;border-radius:10px;padding:13px;margin-bottom:12px}
 .card>b{display:block;margin-bottom:8px}
 .muted{color:#9ba5b1}
+.small{font-size:12px}
 .controls{display:flex;gap:6px;margin:4px 0 10px}
 .controls button{flex:1;background:#20262d;color:#e8e9ea;border:1px solid #343c46;border-radius:7px;padding:8px 10px;cursor:pointer}
 .controls button.active{background:#2368d8;border-color:#4f8cf0}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
 .presets button{background:transparent;color:#9ba5b1;border:1px dashed #343c46;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:12px}
 .presets button:hover{color:#e8e9ea;border-color:#4f8cf0}
+
+/* --- the 15-minute profile: the visual priority ------------------------- */
+#profile h2{margin:0 0 2px;font-size:19px;letter-spacing:.2px}
+#profile .sub{color:#8d98a5;font-size:12px;margin:0 0 12px}
+.prow{position:relative;display:flex;align-items:baseline;gap:10px;padding:7px 9px;border-radius:7px;cursor:pointer;overflow:hidden}
+.prow:hover{background:#1b2129}
+.prow .bar{position:absolute;inset:0 auto 0 0;background:currentColor;opacity:.13;border-radius:7px;z-index:0}
+.prow .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none;z-index:1}
+.prow .nm{flex:1;color:#e8e9ea;z-index:1}
+.prow .ct{font-size:19px;font-variant-numeric:tabular-nums;z-index:1}
+.prow .nr{width:74px;text-align:right;color:#9ba5b1;font-size:12px;z-index:1}
+.prow.empty .ct,.prow.empty .nm{color:#6b7581}
+.prow.off{opacity:.35}
+
+.complete{display:flex;flex-wrap:wrap;gap:6px 12px;margin:2px 0 10px}
+.complete span{font-size:13px}
+.complete .yes{color:#5ce39a}
+.complete .no{color:#ff8b8b}
+.score{font-size:15px;margin-top:4px}
+
+.toggles{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px}
+.toggles label{display:flex;align-items:center;gap:7px;cursor:pointer;padding:3px 0;font-size:13px}
+.toggles .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .metric{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid #252b31}
 .metric:last-child{border-bottom:0}
 .metric span{color:#9ba5b1}
 .metric b{font-variant-numeric:tabular-nums}
-.school{padding:7px 0;border-bottom:1px solid #252b31;cursor:pointer}
-.school:hover{color:#ffca4b}
+details{margin-bottom:12px}
+details>summary{cursor:pointer;color:#9ba5b1;padding:6px 0;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸ ";color:#5b6672}
+details[open]>summary::before{content:"▾ "}
 .edge{padding:7px 0;border-bottom:1px solid #252b31}
 pre{white-space:pre-wrap;word-break:break-word;font-size:12px;color:#c8d0d9}
 label.toggle{display:flex;align-items:center;gap:8px;cursor:pointer;color:#9ba5b1}
 .legend{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:#9ba5b1}
-.swatch{width:22px;height:0;border-top:3px solid #43a2ff}
+.swatch{width:22px;height:0;border-top:3px solid #5cb3ff}
 .swatch.dashed{border-top:2px dashed #ffb454}
 .error{color:#ff8b8b}
-@media(max-width:860px){main{grid-template-columns:1fr;grid-template-rows:55vh 45vh}.panel{border-left:0;border-top:1px solid #262b31}}
+a{color:#6ea8ff}
+@media(max-width:900px){main{grid-template-columns:1fr;grid-template-rows:52vh 48vh}.panel{border-left:0;border-top:1px solid #262b31}}
 </style>
 </head>
 <body>
 <header>
   <div><b>15-Minute Basel</b><small>What can you actually reach on foot?</small></div>
-  <div id="status"><span class="badge" id="badge-streets">streets: …</span><span class="badge" id="badge-entities">entities: …</span></div>
+  <div id="status">
+    <span class="badge" id="badge-streets">streets: …</span>
+    <span class="badge" id="badge-services">services: …</span>
+    <span class="badge" id="badge-entities">entities: …</span>
+  </div>
 </header>
 <main>
   <div id="map"></div>
@@ -57,26 +89,48 @@ label.toggle{display:flex;align-items:center;gap:8px;cursor:pointer;color:#9ba5b
         <button data-min="10">10 min</button>
         <button data-min="15" class="active">15 min</button>
       </div>
-      <p class="muted" style="margin:0 0 8px">Click anywhere in Basel, or jump to:</p>
+      <p class="muted small" style="margin:0 0 8px">Click anywhere in Basel, or jump to:</p>
       <div class="presets">
-        <button data-lat="47.5476" data-lon="7.5893">Basel SBB</button>
         <button data-lat="47.5556" data-lon="7.5906">Barfüsserplatz</button>
+        <button data-lat="47.5476" data-lon="7.5893">Basel SBB</button>
         <button data-lat="47.5626" data-lon="7.5911">Claraplatz</button>
-        <button data-lat="47.5680" data-lon="7.6055">Badischer Bahnhof</button>
+        <button data-lat="47.5820" data-lon="7.6490">Riehen</button>
       </div>
+    </div>
+
+    <div id="profile" class="card">
+      <h2>15 minutes from here</h2>
+      <p class="sub">Click the map to build an accessibility profile.</p>
+    </div>
+
+    <div id="service-detail"></div>
+
+    <div class="card">
+      <b>Services on the map</b>
+      <div class="toggles" id="toggles"></div>
       <div class="legend"><i class="swatch"></i> reachable walking network</div>
       <div class="legend"><i class="swatch dashed"></i>
-        <label class="toggle"><input type="checkbox" id="straight-line"> straight-line radius (not reachability)</label>
+        <label class="toggle"><input type="checkbox" id="straight-line"> straight-line radius</label>
+      </div>
+      <div class="legend">
+        <label class="toggle"><input type="checkbox" id="show-accidents"> road accidents (context)</label>
       </div>
     </div>
-    <div id="access" class="card">
-      <b>Walking accessibility</b>
-      <p class="muted">Choose an origin to route through the real street network.</p>
-    </div>
-    <div id="inspect" class="card">
-      <b>Entity inspector</b>
-      <p class="muted">Click a reachable school or a map entity to inspect its graph relations.</p>
-    </div>
+
+    <details id="network-details">
+      <summary>Walking network &amp; debug</summary>
+      <div class="card" id="network-card"><p class="muted small">No origin selected.</p></div>
+    </details>
+
+    <details id="data-details">
+      <summary>Data sources &amp; quality</summary>
+      <div class="card" id="data-card"><p class="muted small">loading…</p></div>
+    </details>
+
+    <details id="inspect-details">
+      <summary>Entity inspector</summary>
+      <div class="card" id="inspect"><p class="muted small">Click a neighbourhood outline or accident on the map.</p></div>
+    </details>
   </aside>
 </main>
 <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>

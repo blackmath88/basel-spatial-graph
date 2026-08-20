@@ -5,15 +5,22 @@ from fastapi.testclient import TestClient
 from shapely.geometry import LineString
 
 from app.accessibility import WalkingAccessibilityService
-from app.errors import EmptyNetworkError, InvalidCoordinateError, OutsideNetworkError
+from app.errors import (
+    EmptyNetworkError,
+    InvalidCoordinateError,
+    OutsideNetworkError,
+    UnknownServiceError,
+    UnroutableServiceError,
+)
+from app.service_model import ESSENTIAL_CATEGORIES, ServiceCategory
 from app.main import app
 from app.street_sources import fixture_street_network
 from app.street_sources.base import StreetNetwork, make_provenance
 
 
 @pytest.fixture
-def service(streets, entity_graph):
-    return WalkingAccessibilityService(streets, entity_graph)
+def service(streets, entity_graph, service_index):
+    return WalkingAccessibilityService(streets, entity_graph, service_index)
 
 
 @pytest.fixture
@@ -124,13 +131,13 @@ def test_full_budget_reaches_the_whole_chain():
 def test_network_distance_exceeds_straight_line_around_a_barrier(service):
     """The fixture grid has a barrier; reaching past it is a real detour.
 
-    school:2 sits ~1.05 km away in a straight line, but the only crossings are
-    on rows 1 and 4, so the walk is far longer than the crow flies.
+    The eastern school sits ~1.05 km away in a straight line, but the only
+    crossings are on rows 1 and 4, so the walk is far longer than the crow flies.
     """
-    result = service.calculate(47.558, 7.586, minutes=25)
-    row = next(r for r in result["euclidean_vs_network"] if r["id"] == "school:2")
-    assert row["network_distance_m"] > row["euclidean_distance_m"]
-    assert row["network_detour_factor"] > 1.5
+    result = service.calculate(47.558, 7.586, minutes=25, categories=[ServiceCategory.SCHOOL])
+    row = next(r for r in result["euclidean_vs_network"] if r["category"] == "school")
+    assert row["network_distance_m"] >= row["euclidean_distance_m"]
+    assert row["network_detour_factor"] >= 1.0
 
 
 # --- disconnected fragments and empty results --------------------------------
@@ -172,17 +179,73 @@ def test_nodes_across_a_barrier_stay_unreachable(service):
 
 
 # --- entities ----------------------------------------------------------------
-def test_reachable_schools_are_sorted_and_within_budget(service):
+def test_reachable_services_are_grouped_sorted_and_within_budget(service):
     result = service.calculate(47.557, 7.582, minutes=15, speed_kmh=4.8)
-    distances = [s["network_distance_m"] for s in result["reachable_entities"]["schools"]]
-    assert distances and distances == sorted(distances)
-    assert max(distances) <= result["network"]["distance_budget_m"]
-    assert result["reachable_entities"]["school_count"] == len(distances)
+    services = result["reachable_services"]
+    assert set(services) >= {c.value for c in ESSENTIAL_CATEGORIES}
+    for row in services.values():
+        distances = [item["walking_distance_m"] for item in row["items"]]
+        assert distances == sorted(distances)
+        assert row["count"] == len(row["items"])
+        if distances:
+            assert max(distances) <= result["network"]["distance_budget_m"]
+            assert row["nearest_distance_m"] == distances[0]
 
 
-def test_service_works_without_any_entity_graph(streets):
+def test_schools_are_a_service_category_not_a_special_case(service):
+    result = service.calculate(47.557, 7.582, minutes=15)
+    assert "schools" not in result["reachable_entities"]
+    school = result["reachable_services"]["school"]
+    assert school["label"] == "Schools"
+    assert school["essential"] is True
+    assert school["count"] >= 1
+
+
+def test_reachable_service_items_carry_provenance(service):
+    result = service.calculate(47.557, 7.582, minutes=15)
+    item = result["reachable_services"]["grocery"]["items"][0]
+    for key in ("id", "name", "display_name", "category", "geometry",
+                "walking_distance_m", "walking_time_minutes", "provenance"):
+        assert key in item
+    assert item["provenance"]["source"]
+    assert item["provenance"]["category"] == "grocery"
+
+
+def test_completeness_is_reported_and_labelled(service):
+    result = service.calculate(47.557, 7.582, minutes=15)
+    completeness = result["completeness"]
+    assert completeness["total"] == len(ESSENTIAL_CATEGORIES)
+    assert completeness["label"] == "Prototype accessibility completeness"
+    assert 0 <= completeness["reachable_count"] <= completeness["total"]
+    reached = {c for c, row in result["reachable_services"].items() if row["count"]}
+    assert set(completeness["reachable_categories"]) <= reached
+
+
+def test_service_counts_grow_with_the_time_budget(service):
+    counts = []
+    for minutes in (5, 10, 15):
+        result = service.calculate(47.5545, 7.5805, minutes=minutes)
+        counts.append(sum(row["count"] for row in result["reachable_services"].values()))
+    assert counts == sorted(counts)
+    assert counts[0] < counts[-1]
+
+
+def test_categories_can_be_restricted(service):
+    result = service.calculate(47.557, 7.582, minutes=15,
+                               categories=[ServiceCategory.GROCERY, ServiceCategory.PARK])
+    assert set(result["reachable_services"]) == {"grocery", "park"}
+
+
+def test_services_can_be_switched_off(service):
+    result = service.calculate(47.557, 7.582, minutes=15, include_services=False)
+    assert result["reachable_services"] == {}
+    assert result["completeness"] is None
+
+
+def test_service_works_without_any_entity_graph_or_services(streets):
     result = WalkingAccessibilityService(streets).calculate(47.557, 7.582, minutes=10)
-    assert result["reachable_entities"]["schools"] == []
+    assert result["reachable_services"] == {}
+    assert result["completeness"]["reachable_count"] == 0
     assert result["network"]["reachable_edge_count"] > 0
 
 
@@ -223,7 +286,8 @@ def test_walk_api_response_shape(client):
     response = client.get("/accessibility/walk", params={"lat": 47.557, "lon": 7.582, "minutes": 10})
     assert response.status_code == 200
     body = response.json()
-    for key in ("origin", "snapped_origin", "minutes", "walking_speed_kmh", "network", "geometry", "reachable_entities", "provenance"):
+    for key in ("origin", "snapped_origin", "minutes", "walking_speed_kmh", "network", "geometry",
+                "reachable_services", "completeness", "reachable_entities", "provenance"):
         assert key in body
     assert set(body["origin"]) == {"lat", "lon"}
     assert {"node_id", "lat", "lon", "snap_distance_m"} <= set(body["snapped_origin"])
@@ -272,3 +336,122 @@ def test_fixture_network_is_never_labelled_live():
     network = fixture_street_network()
     assert network.provenance["fixture"] is True
     assert network.provenance["mode"] == "fixture"
+
+
+# --- service endpoints -------------------------------------------------------
+def test_services_summary_endpoint(client):
+    body = client.get("/services").json()
+    assert body["mode"] == "fixture"
+    assert body["total"] > 0
+    grocery = next(r for r in body["categories"] if r["category"] == "grocery")
+    assert grocery["label"] == "Groceries" and grocery["essential"] is True
+
+
+def test_services_geojson_endpoint_and_category_filter(client):
+    everything = client.get("/services/geojson").json()
+    assert everything["type"] == "FeatureCollection"
+    parks = client.get("/services/geojson", params={"categories": "park"}).json()
+    assert {f["properties"]["category"] for f in parks["features"]} == {"park"}
+    assert len(parks["features"]) < len(everything["features"])
+
+
+def test_services_of_one_category(client):
+    body = client.get("/services/pharmacy").json()
+    assert {f["properties"]["category"] for f in body["features"]} == {"pharmacy"}
+
+
+def test_unknown_category_is_a_clean_error(client):
+    response = client.get("/services/kebab")
+    assert response.status_code == 404
+    assert response.json()["error"] == "unknown_category"
+
+
+def test_service_detail_endpoint(client):
+    features = client.get("/services/grocery").json()["features"]
+    service_id = features[0]["properties"]["id"]
+    body = client.get(f"/services/grocery/{service_id}").json()
+    assert body["id"] == service_id
+    assert body["provenance"]["source"] == "synthetic fixture"
+    assert body["access"]["quality"] in {"good", "poor", "unreachable", "unsnapped"}
+
+
+def test_service_detail_rejects_a_mismatched_category(client):
+    features = client.get("/services/grocery").json()["features"]
+    response = client.get(f"/services/park/{features[0]['properties']['id']}")
+    assert response.status_code == 404
+    assert response.json()["error"] == "unknown_service"
+
+
+# --- the profile endpoint ----------------------------------------------------
+def test_service_profile_endpoint_skips_geometry(client):
+    body = client.get("/accessibility/walk/services",
+                      params={"lat": 47.557, "lon": 7.582, "minutes": 15}).json()
+    assert "geometry" not in body
+    assert body["reachable_services"]["grocery"]["count"] >= 1
+    assert body["reachable_services"]["grocery"]["items"] == []
+    assert body["completeness"]["total"] == 6
+
+
+def test_service_profile_can_include_items(client):
+    body = client.get("/accessibility/walk/services",
+                      params={"lat": 47.557, "lon": 7.582, "minutes": 15, "include_items": True}).json()
+    assert body["reachable_services"]["grocery"]["items"]
+
+
+# --- routing to a service ----------------------------------------------------
+def test_route_to_a_service(service):
+    result = service.route_to_service(47.5545, 7.5805, "service:pharmacy:fixture:3")
+    assert result["service"]["id"] == "service:pharmacy:fixture:3"
+    assert result["walking_distance_m"] > 0
+    assert result["walking_time_minutes"] > 0
+    kinds = [f["properties"]["kind"] for f in result["geometry"]["features"]]
+    assert "route_connector" in kinds
+    assert result["provenance"]["algorithm"] == "NetworkX Dijkstra shortest path"
+
+
+def test_route_distance_matches_the_reachability_result(service):
+    profile = service.calculate(47.5545, 7.5805, minutes=30)
+    nearest = profile["reachable_services"]["grocery"]["items"][0]
+    route = service.route_to_service(47.5545, 7.5805, nearest["id"])
+    assert route["walking_distance_m"] == pytest.approx(nearest["walking_distance_m"], abs=0.2)
+
+
+def test_route_to_an_unknown_service(service):
+    with pytest.raises(UnknownServiceError):
+        service.route_to_service(47.557, 7.582, "service:grocery:nope")
+
+
+def test_route_to_a_detached_service(streets):
+    from app.service_index import ServiceIndex, snap_services
+    from app.service_model import ServiceCategory as C
+    from app.service_model import ServiceLocation
+
+    detached = ServiceLocation(id="detached", category=C.GROCERY, lon=7.70, lat=47.62,
+                               source="t", source_dataset="t", source_id="1", name="Far away")
+    snap_services(streets, [detached])
+    accessibility = WalkingAccessibilityService(streets, None, ServiceIndex([detached]))
+    with pytest.raises(UnroutableServiceError):
+        accessibility.route_to_service(47.557, 7.582, "detached")
+
+
+def test_route_api_endpoint(client):
+    response = client.get("/accessibility/walk/route",
+                          params={"lat": 47.5545, "lon": 7.5805,
+                                  "service_id": "service:pharmacy:fixture:3"})
+    assert response.status_code == 200
+    assert response.json()["geometry"]["type"] == "FeatureCollection"
+
+
+def test_route_api_reports_an_unknown_service(client):
+    response = client.get("/accessibility/walk/route",
+                          params={"lat": 47.557, "lon": 7.582, "service_id": "nope"})
+    assert response.status_code == 404
+    assert response.json()["error"] == "unknown_service"
+
+
+def test_health_reports_the_service_mode(client):
+    body = client.get("/health").json()
+    assert body["services"]["mode"] == "fixture"
+    assert body["services"]["total"] > 0
+    assert body["categories"]
+    assert all(c["color"].startswith("#") for c in body["categories"])

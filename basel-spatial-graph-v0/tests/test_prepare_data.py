@@ -5,7 +5,9 @@ from shapely.geometry import LineString
 
 from app import prepare_data as pd
 from app.errors import NetworkSourceError
-from app.street_sources import OSMnxWalkingNetworkSource
+from app.errors import ServiceSourceError
+from app.service_model import ServiceCategory
+from app.street_sources import OSMnxWalkingNetworkSource, fixture_street_network
 from app.street_sources.base import LIVE, StreetNetwork, make_provenance, utc_now_iso
 
 
@@ -115,18 +117,94 @@ def test_missing_osmnx_is_explained_not_traced(monkeypatch):
     assert "OSMnx is not installed." in excinfo.value.message
 
 
-def test_cli_exit_code_signals_fixture_mode(monkeypatch, capsys):
-    monkeypatch.setattr(pd, "prepare_network", lambda **kw: {"status": pd.FIXTURE_BANNER})
+def test_cli_exit_code_signals_fixture_mode(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(pd, "write_report", lambda report, path=None: tmp_path / "q.json")
+    monkeypatch.setattr(pd, "prepare_network",
+                        lambda **kw: {"status": pd.FIXTURE_BANNER, "network": fixture_street_network()})
     assert pd.main(["--network-only"]) == 1
-    assert "FIXTURE" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "FIXTURE" in out
+    assert "READY (with fixture fallbacks)" in out
 
 
-def test_cli_exit_code_signals_live_mode(monkeypatch, capsys):
-    monkeypatch.setattr(pd, "prepare_network", lambda **kw: {"status": pd.LIVE_BANNER})
+def test_cli_exit_code_signals_live_mode(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(pd, "write_report", lambda report, path=None: tmp_path / "q.json")
+    monkeypatch.setattr(pd, "prepare_network",
+                        lambda **kw: {"status": pd.LIVE_BANNER, "network": _live_like_network()})
     assert pd.main(["--network-only"]) == 0
     out = capsys.readouterr().out
     assert "status  streets:  LIVE" in out
+    assert "status  overall:  READY" in out
     assert "uvicorn app.main:app --reload" in out
+
+
+# --- services ----------------------------------------------------------------
+def test_services_are_fetched_snapped_and_cached(monkeypatch, tmp_path, capsys):
+    from app import service_sources
+    from app.service_sources.fixture_source import FixtureServiceSource
+
+    cache = tmp_path / "services.json"
+    monkeypatch.setattr(pd, "SERVICE_CACHE", cache)
+    monkeypatch.setattr(service_sources.cache, "SERVICE_CACHE", cache)
+    monkeypatch.setattr(service_sources, "_PROVIDERS", {"fixture": FixtureServiceSource})
+    monkeypatch.setattr(service_sources, "SOURCE_PLAN", {
+        ServiceCategory.GROCERY: ("fixture",), ServiceCategory.PARK: ("fixture",)})
+
+    streets = fixture_street_network()
+    result = pd.prepare_services(streets)
+
+    assert result["status"] == pd.LIVE_BANNER
+    assert cache.exists()
+    index = result["index"]
+    assert index.by_category[ServiceCategory.GROCERY]
+    assert all(s.access_node_id for s in index.services if s.is_routable)
+    out = capsys.readouterr().out
+    assert "Snapping services to walking network" in out
+    assert "total:" in out
+
+
+def test_service_preparation_falls_back_and_says_so(monkeypatch, tmp_path, capsys):
+    from app import service_sources
+
+    class Failing:
+        def fetch(self, category):
+            raise ServiceSourceError("all providers down")
+
+    monkeypatch.setattr(pd, "SERVICE_CACHE", tmp_path / "missing.json")
+    monkeypatch.setattr(service_sources, "_PROVIDERS", {"bad": Failing})
+    monkeypatch.setattr(service_sources, "SOURCE_PLAN", {ServiceCategory.GROCERY: ("bad",)})
+
+    result = pd.prepare_services(fixture_street_network())
+    assert result["status"] == pd.FIXTURE_BANNER
+    out = capsys.readouterr().out
+    assert "FAILED" in out and "all providers down" in out
+
+
+def test_fixture_services_are_reported_as_fixture(capsys):
+    result = pd.prepare_services(fixture_street_network(), fixture=True)
+    assert result["status"] == pd.FIXTURE_BANNER
+    assert result["index"].mode == "fixture"
+    assert "LIVE" not in capsys.readouterr().out
+
+
+def test_cached_services_are_reused(monkeypatch, tmp_path, capsys):
+    from app import service_sources
+    from app.service_index import snap_services
+    from app.service_sources import fixture_services, network_fingerprint, write_cache
+
+    cache = tmp_path / "services.json"
+    streets = fixture_street_network()
+    write_cache(snap_services(streets, fixture_services()), network_fingerprint(streets), cache)
+    monkeypatch.setattr(pd, "SERVICE_CACHE", cache)
+    monkeypatch.setattr(service_sources.cache, "SERVICE_CACHE", cache)
+
+    def must_not_run(*a, **kw):
+        raise AssertionError("a cached run must not fetch")
+
+    monkeypatch.setattr(pd, "fetch_services", must_not_run)
+    result = pd.prepare_services(streets)
+    assert result["status"] == pd.LIVE_BANNER
+    assert "reused existing cache" in capsys.readouterr().out
 
 
 def test_entity_preparation_reports_a_failure_honestly(monkeypatch, tmp_path, capsys):

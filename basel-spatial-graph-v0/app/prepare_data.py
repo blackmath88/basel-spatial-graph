@@ -1,9 +1,10 @@
-"""One-off data preparation: download, normalize, project and cache.
+"""One-off data preparation: download, normalize, project, snap and cache.
 
-    python -m app.prepare_data            # walking network + Basel entities
+    python -m app.prepare_data            # network + entities + services + snapping
     python -m app.prepare_data --refresh  # ignore caches and re-download
     python -m app.prepare_data --fixture  # write nothing live; report fixture mode
     python -m app.prepare_data --network-only
+    python -m app.prepare_data --services-only
 
 The API server never downloads anything: it loads these caches at startup.
 """
@@ -13,9 +14,19 @@ import argparse
 import sys
 import traceback
 
-from .config import ENTITY_CACHE, ENTITY_LIMITS, OSMNX_CACHE_DIR
+from .config import ENTITY_CACHE, ENTITY_LIMITS, OSMNX_CACHE_DIR, SERVICE_CACHE
+from .data_quality import build_report, write_report
 from .errors import BaselGraphError
 from .ingest import fetch_entities, load_data, write_entity_cache
+from .service_index import ServiceIndex, index_from_payload, snap_services
+from .service_model import ESSENTIAL_CATEGORIES, ServiceCategory
+from .service_sources import (
+    SOURCE_PLAN,
+    fetch_services,
+    fixture_services,
+    network_fingerprint,
+    read_cache,
+)
 from .street_sources import OSMnxWalkingNetworkSource, fixture_street_network
 
 LIVE_BANNER = "LIVE"
@@ -119,28 +130,141 @@ def _print_entities(data, cached: bool) -> None:
     print(f"  cached:  {_rel(ENTITY_CACHE)} ({'reused existing cache' if cached else 'written'})")
 
 
+def prepare_services(streets, refresh: bool = False, fixture: bool = False) -> dict:
+    """Fetch every service category, snap it to the walking network, cache it."""
+    print("\nServices\n")
+    if fixture:
+        services = fixture_services()
+        snap_services(streets, services)
+        index = ServiceIndex(services, mode="fixture", fallback_reason="Fixture mode requested")
+        _print_services(index, cached=None)
+        return {"status": FIXTURE_BANNER, "index": index}
+
+    if SERVICE_CACHE.exists() and not refresh:
+        # Read the cache directly: preparation has its own --fixture flag and
+        # must not be steered by the server-side BASEL_SERVICE_SOURCE variable.
+        try:
+            payload = read_cache(SERVICE_CACHE)
+            payload["mode"] = "live"
+            index = _index_from(payload, streets, resnap_note=True)
+            _print_services(index, cached=SERVICE_CACHE, reused=True)
+            return {"status": LIVE_BANNER, "index": index}
+        except BaselGraphError as exc:
+            print(f"  cached services unusable ({exc.message}); fetching again")
+
+    services, errors = fetch_services(on_progress=_print_category)
+    if not services:
+        print("\n  live service sources FAILED entirely; falling back to the fixture.")
+        for category, messages in errors.items():
+            for message in messages:
+                print(f"    - {category}: {message}")
+        services = fixture_services()
+        snap_services(streets, services)
+        index = ServiceIndex(services, mode="fixture",
+                             fallback_reason="; ".join(sum(errors.values(), [])) or "no live services")
+        _print_services(index, cached=None)
+        return {"status": FIXTURE_BANNER, "index": index, "errors": errors}
+
+    print("\nSnapping services to walking network...")
+    snap_services(streets, services)
+    poor = sum(1 for s in services if s.access_quality == "poor")
+    failed = sum(1 for s in services if not s.is_routable)
+    print(f"  done. {len(services):,} attached · {poor:,} poor snaps · {failed:,} not attached")
+
+    from .service_sources import write_cache
+
+    write_cache(services, network_fingerprint(streets), errors=errors)
+    index = ServiceIndex(services, mode="live", source_errors=errors)
+    _print_services(index, cached=SERVICE_CACHE)
+    for category, messages in errors.items():
+        for message in messages:
+            print(f"  ! {category}: {message}")
+    status = FIXTURE_BANNER if errors and len(errors) == len(SOURCE_PLAN) else LIVE_BANNER
+    return {"status": status, "index": index, "errors": errors}
+
+
+def _index_from(payload, streets, resnap_note: bool = False) -> ServiceIndex:
+    """Rebuild the index from a cache, re-snapping and rewriting if it went stale."""
+    def note(fingerprint):
+        if resnap_note:
+            print("  ! cached snapping was made against a different walking network; re-snapping")
+        from .service_sources import write_cache
+
+        write_cache(payload["services"], fingerprint, errors=payload.get("errors"))
+
+    return index_from_payload(payload, streets, on_resnap=note)
+
+
+def _print_category(category: ServiceCategory, services, errors) -> None:
+    plan = "+".join(SOURCE_PLAN.get(category, ()))
+    sources = ", ".join(sorted({s.source for s in services})) or "—"
+    print(f"  {category.value:<11} {len(services):>5}  via {plan:<8} {sources}")
+    for error in errors:
+        print(f"    ! {error}")
+
+
+def _print_services(index: ServiceIndex, cached, reused: bool = False) -> None:
+    for row in index.summary()["categories"]:
+        marker = "*" if row["essential"] else " "
+        print(f" {marker}{row['label']:<11} {row['count']:>5}  {', '.join(row['sources'])}")
+    print(f"\n  total:   {len(index.services):,} service locations")
+    essentials = [c.value for c in ESSENTIAL_CATEGORIES if c not in index.by_category]
+    if essentials:
+        print(f"  MISSING essential categories: {', '.join(essentials)}")
+    if cached is not None:
+        print(f"  cached:  {_rel(cached)} ({'reused existing cache' if reused else 'written'})")
+    else:
+        print("  cached:  not written (fixture data is generated in memory)")
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Prepare Basel walking network and entity caches.")
+    parser = argparse.ArgumentParser(description="Prepare the Basel walking network, entities and services.")
     parser.add_argument("--refresh", action="store_true", help="ignore existing caches and re-download")
     parser.add_argument("--fixture", action="store_true", help="do not touch the network; report fixture mode")
-    parser.add_argument("--network-only", action="store_true", help="skip the entity datasets")
-    parser.add_argument("--entities-only", action="store_true", help="skip the walking network")
+    parser.add_argument("--network-only", action="store_true", help="only the walking network")
+    parser.add_argument("--entities-only", action="store_true", help="only the Basel entity datasets")
+    parser.add_argument("--services-only", action="store_true", help="only the service POIs")
     args = parser.parse_args(argv)
 
-    network_status = entity_status = None
-    if not args.entities_only:
-        network_status = prepare_network(refresh=args.refresh, fixture=args.fixture)["status"]
-    if not args.network_only:
+    only = args.network_only or args.entities_only or args.services_only
+    do_network = args.network_only or not only
+    do_entities = args.entities_only or not only
+    do_services = args.services_only or not only
+
+    print("Preparing Basel Spatial Graph...\n")
+    network_status = entity_status = service_status = None
+    streets = entities = index = None
+
+    if do_network or do_services:
+        result = prepare_network(refresh=args.refresh, fixture=args.fixture)
+        streets = result["network"]
+        if do_network:
+            network_status = result["status"]
+    if do_entities:
         entity_status = prepare_entities(refresh=args.refresh, fixture=args.fixture)["status"]
+        entities = load_data(force_fixture=args.fixture)
+    if do_services:
+        result = prepare_services(streets, refresh=args.refresh, fixture=args.fixture)
+        service_status = result["status"]
+        index = result["index"]
+
+    report = build_report(streets, entities, index)
+    path = write_report(report)
+    print(f"\nData-quality report: {_rel(path)} ({len(report['warnings'])} warning(s))")
+    for warning in report["warnings"][:6]:
+        print(f"  ! {warning}")
+    if len(report["warnings"]) > 6:
+        print(f"  … {len(report['warnings']) - 6} more in the report")
 
     print("\n" + "-" * 58)
-    if network_status:
-        print(f"status  streets:  {network_status}")
-    if entity_status:
-        print(f"status  entities: {entity_status}")
+    for label, status in (("streets", network_status), ("entities", entity_status),
+                          ("services", service_status)):
+        if status:
+            print(f"status  {label + ':':<10}{status}")
+    failed = FIXTURE_BANNER in {network_status, entity_status, service_status}
+    print(f"status  {'overall:':<10}{'READY' if not failed else 'READY (with fixture fallbacks)'}")
     print("-" * 58)
     print("\nStart the app with:  uvicorn app.main:app --reload")
-    failed = FIXTURE_BANNER in {network_status, entity_status}
     return 1 if failed else 0
 
 

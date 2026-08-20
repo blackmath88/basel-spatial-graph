@@ -8,14 +8,23 @@ Every edge carries a length in metres, computed in EPSG:2056. For a request the 
 3. runs single-source Dijkstra with `cutoff = budget` and `weight = "length_m"`;
 4. collects the edges between reachable nodes — walking outward from the reachable set, not scanning the
    whole city;
-5. attaches schools through their pre-computed access nodes, adds the connector distance, sorts by routed
-   distance;
-6. intersects the reachable segments with neighbourhood polygons;
-7. returns per-edge GeoJSON, plus a labelled Euclidean circle for comparison.
+5. looks up every service attached to a reachable node, adds its snap distance, keeps what fits in the
+   budget, and groups the result by category — sorted by walking time, with each category's nearest;
+6. derives the prototype completeness indicator from the six essential categories;
+7. intersects the reachable segments with neighbourhood polygons;
+8. returns per-edge GeoJSON, plus a labelled Euclidean circle for comparison.
+
+Step 5 is a dictionary lookup, not a search: the service index keeps an `access node -> services` map,
+so the cost of answering "what can I reach?" is proportional to the reachable set, not to the catalogue.
+See [the services guide](SERVICES.md) for the categories, their sources and how they attach.
 
 At the default **4.8 km/h**, 5 / 10 / 15 minutes are maximum routed distances of 400 / 800 / 1,200 m.
 These are network budgets, not circle radii. `euclidean_vs_network` reports straight-line distance, routed
-distance and detour factor for every reachable school, so the difference is measurable rather than implied.
+distance and detour factor for each category's *nearest* service, so the difference is measurable rather
+than implied.
+
+Counts alone mislead — "18 groceries" says nothing about whether the first one is 2 or 14 minutes away —
+so every category also reports `nearest_minutes` and `nearest_id`.
 
 ## Reachable, not nearby
 
@@ -35,6 +44,10 @@ and is labelled `NOT reachability` in its own properties.
 | Small disconnected component | `snapped_origin.component_size` is reported and a note is added |
 | Edge with a missing or unusable length | Rebuilt from projected node positions, or dropped and counted |
 | Empty network | HTTP 503 `empty_network` |
+| Unknown service category | HTTP 404 `unknown_category`, listing the known ids |
+| Unknown service id | HTTP 404 `unknown_service` |
+| Route to a service that is not attached to the network | HTTP 422 `unroutable_service` |
+| Service > 500 m from any street | kept in the catalogue, excluded from routing, flagged `unreachable` |
 
 None of these produce a stack trace; each returns `{"error": …, "message": …, "details": …}`.
 
@@ -43,3 +56,7 @@ None of these produce a stack trace; each returns `{"error": …, "message": …
 Constant speed, no slope, no stairs penalty, no surface or width, no crossings, signals, construction or
 opening hours, and no individual mobility needs. Origins snap to the nearest node rather than the nearest
 point along an edge; the snap distance is reported so a client can show it, as the sidebar does.
+
+The completeness indicator counts categories, not quality: one kiosk counts the same as a supermarket,
+and a category with a single reachable location scores exactly like one with twenty. It is labelled a
+prototype wherever it appears, and its definition ships inside the response.

@@ -169,8 +169,12 @@ class StreetNetwork:
             )
         return self._node_ids[index], distance
 
-    def nearest_nodes(self, points):
-        """Batch snapping for (lon, lat) pairs; returns [(node_id, distance_m)]."""
+    def nearest_nodes(self, points, chunk_size: int = 256):
+        """Batch snapping for (lon, lat) pairs; returns [(node_id, distance_m)].
+
+        Chunked so that snapping a few thousand services against a city-sized
+        network never allocates a multi-hundred-megabyte distance matrix.
+        """
         if not self._node_ids or not points:
             return []
         lons = [p[0] for p in points]
@@ -178,14 +182,18 @@ class StreetNetwork:
         xs, ys = to_metric(lons, lats)
         xs = np.atleast_1d(np.asarray(xs, dtype=float))
         ys = np.atleast_1d(np.asarray(ys, dtype=float))
-        dx = self._xy[:, 0][None, :] - xs[:, None]
-        dy = self._xy[:, 1][None, :] - ys[:, None]
-        distances = np.hypot(dx, dy)
-        indices = np.argmin(distances, axis=1)
-        return [
-            (self._node_ids[int(i)], float(distances[row, int(i)]))
-            for row, i in enumerate(indices)
-        ]
+        results = []
+        for start in range(0, len(xs), chunk_size):
+            stop = start + chunk_size
+            dx = self._xy[:, 0][None, :] - xs[start:stop, None]
+            dy = self._xy[:, 1][None, :] - ys[start:stop, None]
+            distances = np.hypot(dx, dy)
+            indices = np.argmin(distances, axis=1)
+            results.extend(
+                (self._node_ids[int(i)], float(distances[row, int(i)]))
+                for row, i in enumerate(indices)
+            )
+        return results
 
     def edge_feature(self, u, v, data: dict) -> dict:
         return {

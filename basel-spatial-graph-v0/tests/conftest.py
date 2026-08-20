@@ -7,6 +7,7 @@ import os
 
 os.environ["BASEL_GRAPH_FIXTURE"] = "1"
 os.environ["BASEL_STREET_NETWORK_SOURCE"] = "fixture"
+os.environ["BASEL_SERVICE_SOURCE"] = "fixture"
 
 import socket  # noqa: E402
 
@@ -14,6 +15,8 @@ import pytest  # noqa: E402
 
 from app.fixtures import fixture_records  # noqa: E402
 from app.graph import build_graph  # noqa: E402
+from app.service_index import ServiceIndex, snap_services  # noqa: E402
+from app.service_sources import fixture_services  # noqa: E402
 from app.street_sources import fixture_street_network  # noqa: E402
 
 
@@ -25,6 +28,12 @@ def streets():
 @pytest.fixture
 def entity_graph():
     return build_graph(fixture_records())
+
+
+@pytest.fixture
+def service_index(streets):
+    """The synthetic services, snapped to the synthetic walking grid."""
+    return ServiceIndex(snap_services(streets, fixture_services()), mode="fixture")
 
 
 @pytest.fixture(autouse=True)

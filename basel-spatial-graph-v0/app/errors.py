@@ -36,3 +36,25 @@ class NetworkSourceError(BaselGraphError):
 
     status_code = 503
     code = "network_source_unavailable"
+
+
+class ServiceSourceError(BaselGraphError):
+    """Raised by a service (POI) source that could not produce locations."""
+
+    status_code = 503
+    code = "service_source_unavailable"
+
+
+class UnknownCategoryError(BaselGraphError):
+    status_code = 404
+    code = "unknown_category"
+
+
+class UnknownServiceError(BaselGraphError):
+    status_code = 404
+    code = "unknown_service"
+
+
+class UnroutableServiceError(BaselGraphError):
+    status_code = 422
+    code = "unroutable_service"

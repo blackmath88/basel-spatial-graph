@@ -27,6 +27,11 @@ ENTITY_LIMITS = {
 # Normalized entity cache, written by `python -m app.prepare_data`.
 ENTITY_CACHE = PROCESSED_DIR / "basel_entities.json"
 
+# Prepared service (POI) cache, written by `python -m app.prepare_data`.
+SERVICE_CACHE = PROCESSED_DIR / "basel_services.json"
+# Generated data-quality report.
+DATA_QUALITY_REPORT = PROCESSED_DIR / "data_quality.json"
+
 # --- Walking network ---------------------------------------------------------
 # Cached, normalized pedestrian network. Written by `python -m app.prepare_data`.
 WALK_NETWORK_CACHE = PROCESSED_DIR / "basel_walking_network.graphml"
@@ -34,11 +39,13 @@ WALK_NETWORK_CACHE = PROCESSED_DIR / "basel_walking_network.graphml"
 OSMNX_CACHE_DIR = RAW_DIR / "osmnx_cache"
 
 # Place queries tried in order before falling back to the bounding box.
+# The canton is the primary target: the Basel-Stadt service datasets cover
+# Riehen and Bettingen too, and a city-only network would leave them unroutable.
 BASEL_PLACE_QUERIES = (
-    "Basel, Switzerland",
     "Basel-Stadt, Switzerland",
+    "Basel, Switzerland",
 )
-BASEL_BBOX = (47.519, 7.554, 47.589, 7.635)  # south, west, north, east
+BASEL_BBOX = (47.5193, 7.5547, 47.6009, 7.6938)  # south, west, north, east
 OSMNX_NETWORK_TYPE = "walk"
 
 # CH1903+ / LV95: the official Swiss projected CRS, metres, correct for Basel.
@@ -50,6 +57,11 @@ DEFAULT_WALKING_SPEED_KMH = float(os.getenv("BASEL_WALKING_SPEED_KMH", "4.8"))
 # A click further than this from any walkable node is reported as an error
 # instead of silently snapping across the city.
 MAX_SNAP_DISTANCE_M = float(os.getenv("BASEL_MAX_SNAP_DISTANCE_M", "1000"))
+# A service further than this from any walkable node is flagged as a poor snap;
+# beyond MAX_SERVICE_SNAP_M it is kept but excluded from routing.
+POOR_SERVICE_SNAP_M = float(os.getenv("BASEL_POOR_SERVICE_SNAP_M", "150"))
+MAX_SERVICE_SNAP_M = float(os.getenv("BASEL_MAX_SERVICE_SNAP_M", "500"))
+
 # Half-width of the "reachable network" visual aid, in metres.
 NETWORK_BUFFER_M = float(os.getenv("BASEL_NETWORK_BUFFER_M", "30"))
 

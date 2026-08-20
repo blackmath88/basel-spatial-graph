@@ -89,7 +89,8 @@ def normalize(kind, rows):
     return result
 
 
-def fetch_dataset(dataset_id, limit, order_by: Optional[str] = None, page_size: int = ODS_PAGE_SIZE):
+def fetch_dataset(dataset_id, limit, order_by: Optional[str] = None,
+                  where: Optional[str] = None, page_size: int = ODS_PAGE_SIZE):
     """Page through the Opendatasoft v2.1 API, which caps `limit` at 100."""
     rows = []
     with httpx.Client(timeout=30, follow_redirects=True) as client:
@@ -97,6 +98,8 @@ def fetch_dataset(dataset_id, limit, order_by: Optional[str] = None, page_size: 
             params = {"limit": min(page_size, limit - len(rows)), "offset": len(rows)}
             if order_by:
                 params["order_by"] = order_by
+            if where:
+                params["where"] = where
             response = client.get(f"{BASEL_API}/{dataset_id}/records", params=params)
             if response.status_code == 400 and order_by:
                 order_by = None  # dataset does not expose that sort field
