@@ -82,3 +82,30 @@ class TransitSourceError(BaselGraphError):
 
     status_code = 503
     code = "transit_source_unavailable"
+
+
+class UnknownEntityTypeError(BaselGraphError):
+    status_code = 404
+    code = "unknown_entity_type"
+
+
+class UnknownRelationError(BaselGraphError):
+    status_code = 404
+    code = "unknown_relation"
+
+
+class UnknownEntityError(BaselGraphError):
+    status_code = 404
+    code = "unknown_entity"
+
+
+class QuerySpecError(BaselGraphError):
+    """The query specification could not be understood or is out of bounds."""
+
+    status_code = 422
+    code = "invalid_query"
+
+
+class SpatialGraphUnavailableError(BaselGraphError):
+    status_code = 503
+    code = "spatial_graph_unavailable"

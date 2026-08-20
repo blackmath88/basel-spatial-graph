@@ -1,0 +1,28 @@
+{
+  "_comment": "Neighbourhoods with many children where a 15-minute walk reaches at most one pharmacy. Statistics come from the graph; the pharmacy count is computed live by the walking engine.",
+  "start": {
+    "type": "Neighborhood",
+    "filters": [{"field": "children", "op": "gt", "value": 1400}]
+  },
+  "analyses": [
+    {
+      "as": "pharmacy_walk_15",
+      "analysis": "accessibility",
+      "mode": "walk",
+      "minutes": 15,
+      "target_category": "pharmacy",
+      "operator": "count_lte",
+      "value": 1
+    }
+  ],
+  "rank": {"by": "Neighborhood.children", "order": "desc"},
+  "return": [
+    "Neighborhood.name",
+    "Neighborhood.children",
+    "Neighborhood.child_share",
+    "Neighborhood.reference_year",
+    "pharmacy_walk_15.count",
+    "pharmacy_walk_15.nearest_minutes"
+  ],
+  "limit": 10
+}

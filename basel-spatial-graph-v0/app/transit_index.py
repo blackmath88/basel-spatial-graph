@@ -289,6 +289,20 @@ class TransitIndex:
             "access": access.to_dict(),
         }
 
+    def route_summary_for_index(self, route_index: int) -> dict:
+        """Describe a route by its own index, not by a pattern that uses it."""
+        route = self.timetable.routes[int(route_index)]
+        return {
+            "id": route.id,
+            "short_name": route.short_name,
+            "long_name": route.long_name,
+            "route_type": route.route_type,
+            "vehicle": route_type_label(route.route_type),
+            "label": route.label,
+            "agency_id": route.agency_id,
+            "agency": route.agency_name,
+        }
+
     def route_summary(self, pattern: int) -> dict:
         table = self.timetable
         route = table.routes[int(table.pattern_route[pattern])]

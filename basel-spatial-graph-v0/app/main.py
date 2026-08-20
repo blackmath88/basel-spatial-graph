@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -17,7 +17,13 @@ from .config import (
     STATIC_DIR,
 )
 from .data_quality import build_report, concise, read_report
-from .errors import BaselGraphError, TransitUnavailableError, UnknownServiceError
+from .errors import (
+    BaselGraphError,
+    QuerySpecError,
+    SpatialGraphUnavailableError,
+    TransitUnavailableError,
+    UnknownServiceError,
+)
 from .transit_model import route_type_label
 from .modes import MODE_COLORS, MODE_ORDER, TravelMode, mode_label, parse_mode
 from .graph import build_graph, centroid_coords, connect_street_access, neighbors, node_payload, subgraph
@@ -32,6 +38,7 @@ from .service_model import (
 )
 from .multimodal import DEFAULT_MAX_TRANSFERS, MAX_TRANSFERS_LIMIT, MultimodalAccessibilityService
 from .service_sources import load_services
+from .spatial_graph import SpatialGraphService
 from .street_sources import load_network
 from .transit_sources import load_transit
 
@@ -63,6 +70,24 @@ if MULTIMODAL.available:
 ANALYSIS = CityAnalysis(STREETS, SERVICES, GRAPH)
 connect_street_access(GRAPH, STREETS)
 QUALITY = read_report() or build_report(NETWORKS, DATA, SERVICES, TRANSIT)
+
+# The heterogeneous graph is optional: the reference application works without
+# it, and it is only present once `python -m app.prepare_spatial_graph` has run.
+# In fixture mode it is built in memory, so a synthetic server never answers
+# from a graph whose coordinates its engines do not recognise.
+if FIXTURE_MODE:
+    from .spatial_graph.fixtures import fixture_graph as _fixture_graph
+
+    SPATIAL_GRAPH = SpatialGraphService(_fixture_graph()[0], engines=SERVICES_BY_MODE)
+else:
+    SPATIAL_GRAPH = SpatialGraphService.load(engines=SERVICES_BY_MODE)
+
+
+def spatial_graph() -> SpatialGraphService:
+    if SPATIAL_GRAPH is None:
+        raise SpatialGraphUnavailableError(
+            "No spatial graph is prepared. Run `python -m app.prepare_spatial_graph`.")
+    return SPATIAL_GRAPH
 
 
 def payload(result: dict) -> JSONResponse:
@@ -166,6 +191,15 @@ def health():
             "stops_attached": sum(1 for a in TRANSIT.stop_access if a.is_routable),
             "default_max_transfers": DEFAULT_MAX_TRANSFERS,
             "timezone": "Europe/Zurich",
+        },
+        "spatial_graph": {
+            "available": SPATIAL_GRAPH is not None,
+            "mode": SPATIAL_GRAPH.graph.metadata.get("mode") if SPATIAL_GRAPH else None,
+            "nodes": SPATIAL_GRAPH.graph.graph.number_of_nodes() if SPATIAL_GRAPH else 0,
+            "edges": SPATIAL_GRAPH.graph.graph.number_of_edges() if SPATIAL_GRAPH else 0,
+            "generated_at": SPATIAL_GRAPH.graph.metadata.get("generated_at") if SPATIAL_GRAPH else None,
+            "population_reference_year": (SPATIAL_GRAPH.graph.metadata.get("population_reference_year")
+                                          if SPATIAL_GRAPH else None),
         },
         "data_quality": {
             "available": bool(QUALITY),
@@ -571,6 +605,126 @@ def graph_subgraph(node_id: str, depth: int = Query(1, ge=1, le=4)):
     if node_id not in GRAPH:
         raise HTTPException(404, "Node not found")
     return subgraph(GRAPH, node_id, depth)
+
+
+# --- Spatial Graph Core ------------------------------------------------------
+@app.get("/spatial-graph/status", tags=["spatial-graph"])
+def spatial_graph_status():
+    """What is loaded, when it was built, and which sources it came from."""
+    return spatial_graph().status()
+
+
+@app.get("/spatial-graph/schema", tags=["spatial-graph"])
+def spatial_graph_schema():
+    """The whole machine-readable schema: entity types, relations, operators, analyses."""
+    return spatial_graph().schema()
+
+
+@app.get("/spatial-graph/entity-types", tags=["spatial-graph"])
+def spatial_graph_entity_types():
+    return spatial_graph().entity_types()
+
+
+@app.get("/spatial-graph/relation-types", tags=["spatial-graph"])
+def spatial_graph_relation_types():
+    return spatial_graph().relation_types()
+
+
+@app.get("/spatial-graph/questions", tags=["spatial-graph"])
+def spatial_graph_questions():
+    """The standing cross-domain questions this graph can answer."""
+    from .spatial_graph.questions import QUESTIONS
+
+    return {
+        "questions": [
+            {"name": name,
+             "summary": (function.__doc__ or "").strip().splitlines()[0],
+             "parameters": [p for p in function.__code__.co_varnames[:function.__code__.co_argcount]
+                            if p not in {"graph", "analysis"}]}
+            for name, function in QUESTIONS.items()
+        ]
+    }
+
+
+@app.get("/spatial-graph/questions/{name}", tags=["spatial-graph"])
+def spatial_graph_question(
+    name: str,
+    category: Optional[str] = Query(None),
+    mode: Optional[str] = Query(None, description="walk | bike | transit"),
+    minutes: Optional[float] = Query(None, gt=0, le=60),
+    limit: Optional[int] = Query(None, ge=1, le=100),
+    min_children: Optional[int] = Query(None, ge=0),
+    departure_time: Optional[str] = Query(None),
+):
+    """Run one standing question. Every answer states its own methodology."""
+    import inspect
+
+    from .spatial_graph.questions import QUESTIONS
+
+    if name not in QUESTIONS:
+        raise QuerySpecError(f"Unknown question '{name}'.", known=sorted(QUESTIONS))
+    wanted = {"category": category, "mode": mode, "minutes": minutes, "limit": limit,
+              "min_children": min_children, "departure_time": departure_time}
+    accepted = inspect.signature(QUESTIONS[name]).parameters
+    params = {k: v for k, v in wanted.items() if v is not None and k in accepted}
+    return payload(spatial_graph().ask(name, **params))
+
+
+@app.get("/spatial-graph/entities/{type_name}", tags=["spatial-graph"])
+def spatial_graph_entities(
+    type_name: str,
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    include_geometry: bool = Query(False),
+):
+    """List entities of one type. Geometry is omitted unless asked for."""
+    return payload(spatial_graph().entities(type_name, limit=limit, offset=offset,
+                                            include_geometry=include_geometry))
+
+
+@app.get("/spatial-graph/entities/{type_name}/{entity_id}", tags=["spatial-graph"])
+def spatial_graph_entity(type_name: str, entity_id: str,
+                         include_geometry: bool = Query(False)):
+    return payload(spatial_graph().entity(type_name, entity_id, include_geometry))
+
+
+@app.get("/spatial-graph/entities/{type_name}/{entity_id}/neighbors", tags=["spatial-graph"])
+def spatial_graph_neighbors(
+    type_name: str, entity_id: str,
+    relation: Optional[str] = Query(None),
+    target_type: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    include_geometry: bool = Query(False),
+):
+    return payload(spatial_graph().neighbors(type_name, entity_id, relation=relation,
+                                             target_type=target_type, limit=limit,
+                                             include_geometry=include_geometry))
+
+
+@app.get("/spatial-graph/entities/{type_name}/{entity_id}/subgraph", tags=["spatial-graph"])
+def spatial_graph_subgraph(
+    type_name: str, entity_id: str,
+    depth: int = Query(2, ge=1, le=4),
+    relations: Optional[str] = Query(None, description="comma-separated relation names"),
+    limit: int = Query(200, ge=1, le=1000),
+    include_geometry: bool = Query(False),
+):
+    wanted = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
+    return payload(spatial_graph().subgraph(type_name, entity_id, depth=depth,
+                                            relations=wanted, limit=limit,
+                                            include_geometry=include_geometry))
+
+
+@app.post("/spatial-graph/query", tags=["spatial-graph"])
+def spatial_graph_query(spec: dict = Body(..., description="A query specification")):
+    """Run a bounded relational query. See docs/QUERY_API.md for the grammar."""
+    return payload(spatial_graph().query(spec))
+
+
+@app.get("/spatial-graph/provenance/{entity_id}", tags=["spatial-graph"])
+def spatial_graph_provenance(entity_id: str):
+    """Where one entity — or one relation type — came from."""
+    return spatial_graph().provenance(entity_id)
 
 
 @app.get("/analysis/accessibility-gaps", tags=["analysis"])

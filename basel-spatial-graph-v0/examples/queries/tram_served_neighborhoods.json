@@ -1,0 +1,12 @@
+{
+  "_comment": "Two hops: neighbourhood -> its transit stops -> the routes calling there. Entirely persisted structure.",
+  "start": {"type": "Neighborhood", "filters": [{"field": "population_total", "op": "gt", "value": 9000}]},
+  "traverse": [
+    {"relation": "HAS_TRANSIT_STOP", "target_type": "TransitStop", "as": "stops", "min_count": 1},
+    {"relation": "SERVED_BY", "target_type": "TransitRoute", "as": "routes", "from": "stops",
+     "filters": [{"field": "vehicle", "op": "eq", "value": "Tram"}]}
+  ],
+  "rank": {"by": "routes.count", "order": "desc"},
+  "return": ["Neighborhood.name", "Neighborhood.population_total", "stops.count", "routes.count", "routes.label"],
+  "limit": 10
+}

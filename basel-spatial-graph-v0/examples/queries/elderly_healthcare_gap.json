@@ -1,0 +1,15 @@
+{
+  "_comment": "Where do many people over 65 live with poor healthcare access on foot?",
+  "start": {
+    "type": "Neighborhood",
+    "filters": [{"field": "elderly_share", "op": "gt", "value": 0.18}]
+  },
+  "analyses": [
+    {"as": "healthcare_walk_15", "analysis": "accessibility", "mode": "walk", "minutes": 15,
+     "target_category": "healthcare", "operator": "count_lt", "value": 5}
+  ],
+  "rank": {"by": "Neighborhood.elderly", "order": "desc"},
+  "return": ["Neighborhood.name", "Neighborhood.elderly", "Neighborhood.elderly_share",
+             "healthcare_walk_15.count", "healthcare_walk_15.nearest_minutes"],
+  "limit": 10
+}

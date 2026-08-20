@@ -17,6 +17,7 @@ import traceback
 
 from .config import (
     ENTITY_CACHE,
+    POPULATION_CACHE,
     ENTITY_LIMITS,
     GTFS_ARCHIVE,
     MIN_TRANSFER_SECONDS,
@@ -27,6 +28,9 @@ from .config import (
 from .data_quality import build_report, write_report
 from .errors import BaselGraphError
 from .ingest import fetch_entities, load_data, write_entity_cache
+from .population import fetch_population as fetch_population_data
+from .population import load_population
+from .population import write_cache as write_population_cache
 from .service_index import ServiceIndex, index_from_payload, snap_services
 from .service_model import ESSENTIAL_CATEGORIES, ServiceCategory
 from .service_sources import (
@@ -255,6 +259,43 @@ def _print_services(index: ServiceIndex, networks=None, cached=None, reused: boo
         print("  cached:  not written (fixture data is generated in memory)")
 
 
+def prepare_population(refresh: bool = False, fixture: bool = False) -> dict:
+    """Neighbourhood population by age group — the statistical dimension."""
+    print("\nPopulation\n")
+    if fixture:
+        print("  source:  synthetic fixture (requested)")
+        return {"status": FIXTURE_BANNER}
+    if POPULATION_CACHE.exists() and not refresh:
+        data = load_population()
+        if data.get("mode") == "live":
+            _print_population(data, reused=True)
+            return {"status": LIVE_BANNER}
+    try:
+        data = fetch_population_data()
+    except Exception as exc:
+        print(f"  live source FAILED: {exc}")
+        print("  The graph will fall back to synthetic population figures.")
+        return {"status": FIXTURE_BANNER, "error": str(exc)}
+    write_population_cache(data)
+    _print_population(data, reused=False)
+    return {"status": LIVE_BANNER}
+
+
+def _print_population(data: dict, reused: bool) -> None:
+    provenance = data.get("provenance", {})
+    years = data.get("years", [])
+    print(f"  source:  {provenance.get('source')}")
+    print(f"  dataset: {provenance.get('dataset')} — {provenance.get('dataset_title')}")
+    print(f"  unit:    {provenance.get('spatial_unit')}")
+    print(f"  years:   {min(years)}–{max(years)} ({len(years)} prepared, latest "
+          f"{data.get('latest_year')})")
+    print(f"  rows:    {len(data.get('observations', [])):,} observations")
+    for name, definition in (provenance.get("age_group_definitions") or {}).items():
+        print(f"    {name:<16} {definition}")
+    print(f"  cached:  {_rel(POPULATION_CACHE)} "
+          f"({'reused existing cache' if reused else 'written'})")
+
+
 def prepare_transit(streets, refresh: bool = False, fixture: bool = False) -> dict:
     """Download the Swiss GTFS feed, extract the Basel subset, attach it to the
     walking network, and cache the result."""
@@ -342,13 +383,19 @@ def main(argv=None) -> int:
     parser.add_argument("--entities-only", action="store_true", help="only the Basel entity datasets")
     parser.add_argument("--services-only", action="store_true", help="only the service POIs")
     parser.add_argument("--transit-only", action="store_true", help="only the GTFS timetable")
+    parser.add_argument("--population-only", action="store_true",
+                        help="only the neighbourhood population data")
+    parser.add_argument("--skip-spatial-graph", action="store_true",
+                        help="do not rebuild the heterogeneous spatial graph at the end")
     args = parser.parse_args(argv)
 
-    only = args.network_only or args.entities_only or args.services_only or args.transit_only
+    only = (args.network_only or args.entities_only or args.services_only
+            or args.transit_only or args.population_only)
     do_network = args.network_only or not only
     do_entities = args.entities_only or not only
     do_services = args.services_only or not only
     do_transit = args.transit_only or not only
+    do_population = args.population_only or not only
 
     print("Preparing Basel Spatial Graph...\n")
     statuses = {}
@@ -372,6 +419,9 @@ def main(argv=None) -> int:
         result = prepare_transit(networks.get("walk"), refresh=args.refresh, fixture=args.fixture)
         statuses["transit"] = result["status"]
         transit = result["index"]
+    if do_population:
+        statuses["population"] = prepare_population(refresh=args.refresh,
+                                                    fixture=args.fixture)["status"]
 
     report = build_report(networks or None, entities, index, transit)
     path = write_report(report)
@@ -381,8 +431,17 @@ def main(argv=None) -> int:
     if len(report["warnings"]) > 6:
         print(f"  … {len(report['warnings']) - 6} more in the report")
 
+    if not only and not args.skip_spatial_graph:
+        from .prepare_spatial_graph import prepare as prepare_graph
+
+        print()
+        graph = prepare_graph(fixture=args.fixture, verbose=False)
+        statuses["spatial graph"] = (LIVE_BANNER if graph.metadata["mode"] == "live"
+                                     else FIXTURE_BANNER)
+
     print("\n" + "-" * 58)
-    for label in ("streets", "bike", "entities", "services", "transit"):
+    for label in ("streets", "bike", "entities", "services", "transit", "population",
+                  "spatial graph"):
         if label in statuses:
             print(f"status  {label + ':':<10}{statuses[label]}")
     failed = FIXTURE_BANNER in statuses.values()

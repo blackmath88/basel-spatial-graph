@@ -1,0 +1,15 @@
+{
+  "_comment": "Pure structure, no routing: how many pharmacies physically sit inside each neighbourhood, and how many people live there.",
+  "start": {"type": "Neighborhood"},
+  "traverse": [
+    {
+      "relation": "HAS_SERVICE",
+      "target_type": "ServiceLocation",
+      "as": "pharmacies",
+      "filters": [{"field": "category", "op": "eq", "value": "pharmacy"}]
+    }
+  ],
+  "rank": {"by": "pharmacies.count", "order": "asc"},
+  "return": ["Neighborhood.name", "Neighborhood.population_total", "pharmacies.count"],
+  "limit": 25
+}

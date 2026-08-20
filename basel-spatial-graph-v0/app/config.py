@@ -31,6 +31,12 @@ ENTITY_CACHE = PROCESSED_DIR / "basel_entities.json"
 SERVICE_CACHE = PROCESSED_DIR / "basel_services.json"
 # Generated data-quality report.
 DATA_QUALITY_REPORT = PROCESSED_DIR / "data_quality.json"
+# Neighbourhood population by age group, written by `python -m app.prepare_data`.
+POPULATION_CACHE = PROCESSED_DIR / "basel_population.json"
+# How many recent years of population data to prepare (the source has 49).
+POPULATION_YEARS = int(os.getenv("BASEL_POPULATION_YEARS", "10"))
+# The heterogeneous spatial graph, written by `python -m app.prepare_spatial_graph`.
+SPATIAL_GRAPH_CACHE = PROCESSED_DIR / "basel_spatial_graph.json"
 
 # --- Travel modes ---------------------------------------------------------
 # Cached, normalized networks. Written by `python -m app.prepare_data`.
