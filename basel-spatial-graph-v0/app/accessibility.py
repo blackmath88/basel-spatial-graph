@@ -1,9 +1,13 @@
-"""Network-weighted walking accessibility over a real (or fixture) street graph.
+"""Network-weighted accessibility over a real (or fixture) street graph.
 
-Everything here is measured along the graph: a time budget becomes a distance
-budget, Dijkstra spends that budget on real edge lengths, and the result is the
-set of street segments actually reachable on foot. The straight-line circle is
-computed too, but only ever returned as a labelled comparison.
+One engine serves both street modes. Everything is measured along the graph: a
+time budget becomes a distance budget at the mode's speed, Dijkstra spends that
+budget on real edge lengths, and the result is the set of segments actually
+reachable — on foot at 4.8 km/h, or by bicycle over the bicycle-accessible
+graph at 15 km/h. The straight-line circle is computed too, but only ever
+returned as a labelled comparison.
+
+Transit builds on this rather than replacing it: see `app/multimodal.py`.
 """
 from __future__ import annotations
 
@@ -14,7 +18,8 @@ import networkx as nx
 from shapely.geometry import Point, mapping, shape
 from shapely.ops import unary_union
 
-from .config import DEFAULT_WALKING_SPEED_KMH, NETWORK_BUFFER_M
+from .config import DEFAULT_CYCLING_SPEED_KMH, DEFAULT_WALKING_SPEED_KMH, NETWORK_BUFFER_M
+from .modes import NETWORK_FOR_MODE, TravelMode, mode_label
 from .errors import (
     EmptyNetworkError,
     InvalidCoordinateError,
@@ -46,10 +51,10 @@ def _round_geometry(geometry: dict) -> dict:
     return {**geometry, "coordinates": walk(geometry["coordinates"])}
 
 
-class WalkingAccessibilityService:
-    """Answers 'what is reachable on foot from here?' for one street network."""
+class NetworkAccessibilityService:
+    """Answers 'what is reachable from here?' over one street network."""
 
-    mode = "walk"
+    travel_mode = TravelMode.WALK
 
     def __init__(
         self,
@@ -57,7 +62,16 @@ class WalkingAccessibilityService:
         entity_graph: Optional[nx.MultiDiGraph] = None,
         services: Optional[ServiceIndex] = None,
         buffer_m: float = NETWORK_BUFFER_M,
+        travel_mode: Optional[TravelMode] = None,
+        default_speed_kmh: Optional[float] = None,
     ):
+        self.travel_mode = travel_mode or type(self).travel_mode
+        self.mode = self.travel_mode.value
+        self.network = NETWORK_FOR_MODE[self.travel_mode]
+        self.default_speed_kmh = default_speed_kmh or (
+            DEFAULT_CYCLING_SPEED_KMH if self.travel_mode is TravelMode.BIKE
+            else DEFAULT_WALKING_SPEED_KMH
+        )
         self.streets = streets
         self.entity_graph = entity_graph if entity_graph is not None else nx.MultiDiGraph()
         self.services = services if services is not None else ServiceIndex([])
@@ -68,6 +82,10 @@ class WalkingAccessibilityService:
         self._label_components()
 
     # -- setup ----------------------------------------------------------------
+    @property
+    def label(self) -> str:
+        return mode_label(self.travel_mode)
+
     def _attach_entities(self) -> None:
         """Precompute each point entity's nearest network node, once."""
         entities = [
@@ -103,7 +121,7 @@ class WalkingAccessibilityService:
         lat: float,
         lon: float,
         minutes: float = 15.0,
-        speed_kmh: float = DEFAULT_WALKING_SPEED_KMH,
+        speed_kmh: Optional[float] = None,
         include_straight_line: bool = True,
         include_buffer: bool = False,
         categories: Optional[Sequence[ServiceCategory]] = None,
@@ -113,7 +131,8 @@ class WalkingAccessibilityService:
         include_geometry: bool = True,
     ) -> dict:
         minutes = self._positive(minutes, "minutes")
-        speed_kmh = self._positive(speed_kmh, "walking_speed_kmh")
+        speed_kmh = self._positive(
+            self.default_speed_kmh if speed_kmh is None else speed_kmh, "speed_kmh")
         if self.streets.graph.number_of_nodes() == 0:
             raise EmptyNetworkError("The walking network contains no nodes.")
 
@@ -131,7 +150,6 @@ class WalkingAccessibilityService:
         if include_geometry:
             for u, v, data in edges:
                 feature = self.streets.edge_feature(u, v, data)
-                feature["geometry"] = _round_geometry(feature["geometry"])
                 feature["properties"]["kind"] = "reachable_edge"
                 features.append(feature)
             if include_buffer:
@@ -145,6 +163,7 @@ class WalkingAccessibilityService:
             reachable_services = self.services.reachable(
                 costs, budget, speed_kmh, categories=categories,
                 include_items=include_service_items, limit=service_limit,
+                network=self.network,
             )
         else:
             reachable_services = {}
@@ -175,7 +194,10 @@ class WalkingAccessibilityService:
                 "component_index": component_index,
             },
             "mode": self.mode,
+            "mode_label": self.label,
             "minutes": minutes,
+            "speed_kmh": speed_kmh,
+            # V0.2/V0.3 name, kept for existing clients.
             "walking_speed_kmh": speed_kmh,
             "network": {
                 "origin_node_id": origin_node,
@@ -195,12 +217,16 @@ class WalkingAccessibilityService:
             "euclidean_vs_network": self._comparisons(lon, lat, reachable_services),
             "notes": notes,
             "provenance": {
+                "travel_mode": self.mode,
+                "network_kind": self.network,
                 "network_source": self.streets.source_name,
                 "mode": self.streets.mode,
                 "classification": "analytical result",
                 "algorithm": "NetworkX single-source Dijkstra",
+                "routing_method": f"network distance / {speed_kmh:g} km/h",
                 "edge_weight": "length_m",
                 "distance_crs": self.streets.provenance.get("metric_crs"),
+                "speed_kmh": speed_kmh,
                 "walking_speed_kmh": speed_kmh,
                 "time_budget_minutes": minutes,
                 "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -212,27 +238,29 @@ class WalkingAccessibilityService:
         }
 
     def route_to_service(self, lat: float, lon: float, service_id: str,
-                         speed_kmh: float = DEFAULT_WALKING_SPEED_KMH) -> dict:
+                         speed_kmh: Optional[float] = None) -> dict:
         """The shortest walking path from a clicked origin to one service.
 
         Same graph, same weights as the reachability query, so the reported
         distance always agrees with the profile.
         """
-        speed_kmh = self._positive(speed_kmh, "walking_speed_kmh")
+        speed_kmh = self._positive(
+            self.default_speed_kmh if speed_kmh is None else speed_kmh, "speed_kmh")
         service = self.services.get(service_id)
         if service is None:
             raise UnknownServiceError(f"No prepared service with id '{service_id}'.")
-        if not service.is_routable:
+        access = service.access_for(self.network)
+        if not access.is_routable:
             raise UnroutableServiceError(
-                f"'{service.display_name}' is {service.access_distance_m:.0f} m from the nearest "
-                "walkable street and is not attached to the network."
-                if service.access_distance_m is not None else
-                f"'{service.display_name}' is not attached to the walking network.",
-                service_id=service_id, access_quality=service.access_quality,
+                f"'{service.display_name}' is {access.distance_m:.0f} m from the nearest "
+                f"{self.network} street and is not attached to that network."
+                if access.distance_m is not None else
+                f"'{service.display_name}' is not attached to the {self.network} network.",
+                service_id=service_id, access_quality=access.quality, network=self.network,
             )
         origin_node, snap_m = self.streets.nearest_node(lat, lon)
         try:
-            path = nx.shortest_path(self.streets.graph, origin_node, service.access_node_id,
+            path = nx.shortest_path(self.streets.graph, origin_node, access.node_id,
                                     weight="length_m")
         except nx.NetworkXNoPath:
             raise UnroutableServiceError(
@@ -245,7 +273,7 @@ class WalkingAccessibilityService:
             data = self.streets.graph[u][v]
             lines.append(data["geom"])
             network_distance += data["length_m"]
-        total = network_distance + service.access_distance_m
+        total = network_distance + access.distance_m
         metres_per_minute = speed_kmh * 1000.0 / 60.0
         features = []
         if lines:
@@ -254,7 +282,7 @@ class WalkingAccessibilityService:
                 "geometry": _round_geometry(mapping(unary_union(lines))),
                 "properties": {"kind": "route", "length_m": round(network_distance, 1)},
             })
-        node = self.streets.graph.nodes[service.access_node_id]
+        node = self.streets.graph.nodes[access.node_id]
         features.append({
             "type": "Feature",
             "geometry": {"type": "LineString", "coordinates": [
@@ -262,12 +290,15 @@ class WalkingAccessibilityService:
                 [round(service.lon, 6), round(service.lat, 6)],
             ]},
             "properties": {"kind": "route_connector",
-                           "length_m": round(service.access_distance_m, 1)},
+                           "length_m": round(access.distance_m, 1)},
         })
         return {
             "origin": {"lat": round(float(lat), 6), "lon": round(float(lon), 6)},
             "snapped_origin": {"node_id": origin_node, "snap_distance_m": round(snap_m, 1)},
-            "service": service.summary(),
+            "service": service.summary(self.network),
+            "mode": self.mode,
+            "mode_label": self.label,
+            "speed_kmh": speed_kmh,
             "walking_speed_kmh": speed_kmh,
             "network_distance_m": round(network_distance, 1),
             "walking_distance_m": round(total, 1),
@@ -275,11 +306,14 @@ class WalkingAccessibilityService:
             "node_count": len(path),
             "geometry": {"type": "FeatureCollection", "features": features},
             "provenance": {
+                "travel_mode": self.mode,
+                "network_kind": self.network,
                 "algorithm": "NetworkX Dijkstra shortest path",
                 "edge_weight": "length_m",
                 "distance_crs": self.streets.provenance.get("metric_crs"),
                 "network_source": self.streets.source_name,
                 "mode": self.streets.mode,
+                "speed_kmh": speed_kmh,
                 "service": service.provenance,
             },
         }
@@ -403,3 +437,21 @@ class WalkingAccessibilityService:
             })
         rows.sort(key=lambda r: r["category"])
         return rows
+
+
+class WalkingAccessibilityService(NetworkAccessibilityService):
+    """Walking. The V0.2/V0.3 class name and constructor, unchanged."""
+
+    travel_mode = TravelMode.WALK
+
+
+class CyclingAccessibilityService(NetworkAccessibilityService):
+    """Cycling over the bicycle-accessible network.
+
+    Deliberately the same engine as walking with a different graph and speed:
+    for a prototype, `edge length / 15 km/h` is the whole cost model. It ignores
+    slope, traffic stress, surface, turn penalties and one-way rules — see
+    docs/CYCLING.md.
+    """
+
+    travel_mode = TravelMode.BIKE

@@ -24,12 +24,23 @@ map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-ri
 map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }));
 
 let minutes = 15;
+let mode = 'walk';
 let origin = null;
 let health = null;
 let categories = [];            // [{category,label,color,essential,count}]
+let modes = [];                 // [{mode,label,color,available,default_speed_kmh}]
 let enabled = new Set();        // categories currently drawn
 let lastResult = null;
 let reachableIds = [];
+
+const MODE_COLORS = { walk: '#5cb3ff', bike: '#4ee6c0', transit: '#c792ea' };
+const NETWORK_LEGEND = {
+  walk: 'reachable walking network',
+  bike: 'reachable cycling network',
+  transit: 'walking reach · transit rides taken'
+};
+const currentColor = () => MODE_COLORS[mode] || MODE_COLORS.walk;
+const departureValue = () => ($('departure').value || '').trim() || undefined;
 
 const $ = id => document.getElementById(id);
 const get = async url => {
@@ -72,12 +83,27 @@ map.on('load', async () => {
   map.addLayer({
     id: 'access-corridor', type: 'line', source: 'accessibility',
     filter: ['==', ['get', 'kind'], 'reachable_edge'],
-    paint: { 'line-color': '#3d8bfd', 'line-opacity': .18, 'line-width': CORRIDOR_WIDTH, 'line-blur': 2 }
+    paint: { 'line-color': MODE_COLORS.walk, 'line-opacity': .16, 'line-width': CORRIDOR_WIDTH, 'line-blur': 2 }
   });
   map.addLayer({
     id: 'access-streets', type: 'line', source: 'accessibility',
     filter: ['==', ['get', 'kind'], 'reachable_edge'],
-    paint: { 'line-color': '#5cb3ff', 'line-width': 1.8, 'line-opacity': .85 }
+    paint: { 'line-color': MODE_COLORS.walk, 'line-width': 1.8, 'line-opacity': .85 }
+  });
+  // Transit: only the rides actually taken, and the stops they reach.
+  map.addLayer({
+    id: 'transit-segments', type: 'line', source: 'accessibility',
+    filter: ['==', ['get', 'kind'], 'transit_segment'],
+    paint: { 'line-color': MODE_COLORS.transit, 'line-width': 2.6, 'line-opacity': .85 }
+  });
+  map.addLayer({
+    id: 'transit-stops', type: 'circle', source: 'accessibility',
+    filter: ['==', ['get', 'kind'], 'transit_stop'],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.5, 16, 5],
+      'circle-color': '#0d0f12', 'circle-stroke-width': 2,
+      'circle-stroke-color': MODE_COLORS.transit
+    }
   });
 
   await addEntityLayer('areas', 'fill', '#8a9bff');
@@ -86,7 +112,10 @@ map.on('load', async () => {
 
   health = await get('/health');
   categories = health.categories || [];
+  modes = (health.modes || []).filter(m => m.available);
   enabled = new Set(categories.filter(c => c.essential).map(c => c.category));
+  renderModes();
+  initDeparture();
 
   const services = await get('/services/geojson');
   map.addSource('services', { type: 'geojson', data: services });
@@ -109,12 +138,17 @@ map.on('load', async () => {
   // Route to a selected service, drawn above the reachable network.
   map.addLayer({
     id: 'route-line', type: 'line', source: 'route',
-    filter: ['==', ['get', 'kind'], 'route'],
+    filter: ['in', ['get', 'kind'], ['literal', ['route', 'walk_leg', 'walk_leg_final']]],
     paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-opacity': .95 }
   });
   map.addLayer({
+    id: 'route-transit', type: 'line', source: 'route',
+    filter: ['==', ['get', 'kind'], 'transit_leg'],
+    paint: { 'line-color': MODE_COLORS.transit, 'line-width': 4, 'line-opacity': .95 }
+  });
+  map.addLayer({
     id: 'route-connector', type: 'line', source: 'route',
-    filter: ['==', ['get', 'kind'], 'route_connector'],
+    filter: ['in', ['get', 'kind'], ['literal', ['route_connector', 'transfer_leg']]],
     paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': .7 }
   });
 
@@ -165,8 +199,43 @@ function renderBadges(h) {
     el.title = reason || '';
   };
   set('badge-streets', 'streets', h.streets.mode, h.streets.fallback_reason);
+  set('badge-bike', 'bike', h.bike.mode, h.bike.fallback_reason);
+  set('badge-transit', 'transit', h.transit.mode, h.transit.fallback_reason);
   set('badge-services', 'services', h.services.mode, h.services.fallback_reason);
-  set('badge-entities', 'entities', h.entities.mode, h.entities.fallback_reason);
+}
+
+function renderModes() {
+  $('mode-controls').innerHTML = modes.map(m =>
+    `<button data-mode="${escapeAttr(m.mode)}" style="--mode:${escapeAttr(m.color)}"
+             class="${m.mode === mode ? 'active' : ''}"
+             title="${escapeHtml(m.label)}${m.default_speed_kmh ? ` · ${m.default_speed_kmh} km/h` : ''}">
+       ${escapeHtml(m.label)}</button>`).join('');
+  document.querySelectorAll('[data-mode]').forEach(button => button.onclick = () => {
+    mode = button.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(other =>
+      other.classList.toggle('active', other === button));
+    applyModeStyling();
+    if (origin) calculate();
+  });
+  applyModeStyling();
+}
+
+function applyModeStyling() {
+  const color = currentColor();
+  ['access-corridor', 'access-streets'].forEach(layer => {
+    if (map.getLayer(layer)) map.setPaintProperty(layer, 'line-color', color);
+  });
+  const swatch = $('network-swatch');
+  if (swatch) swatch.style.borderTopColor = color;
+  $('network-legend').textContent = NETWORK_LEGEND[mode] || NETWORK_LEGEND.walk;
+  $('departure-row').hidden = mode !== 'transit';
+}
+
+function initDeparture() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  $('departure').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  $('departure').onchange = () => { if (origin && mode === 'transit') calculate(); };
 }
 
 function renderToggles() {
@@ -216,7 +285,7 @@ map.on('click', e => {
 // --- the query ---------------------------------------------------------------
 async function calculate() {
   if (!map.getSource('accessibility')) return;   // map still initialising
-  $('profile').innerHTML = `<h2>${minutes} minutes from here</h2><p class="sub">Routing through the network…</p>`;
+  $('profile').innerHTML = `<h2>${minutes} minutes from here</h2><p class="sub">Routing…</p>`;
   $('service-detail').innerHTML = '';
   map.getSource('route').setData(EMPTY);
   map.getSource('origin').setData({
@@ -224,9 +293,13 @@ async function calculate() {
     features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [origin.lon, origin.lat] }, properties: { role: 'click' } }]
   });
   try {
-    const result = await get(`/accessibility/walk?lat=${origin.lat}&lon=${origin.lon}&minutes=${minutes}`);
+    const params = new URLSearchParams({ lat: origin.lat, lon: origin.lon, mode, minutes });
+    if (mode === 'transit' && departureValue()) params.set('departure_time', departureValue());
+    const result = await get('/accessibility?' + params);
     lastResult = result;
-    reachableIds = Object.values(result.reachable_services).flatMap(row => row.items.map(i => i.id));
+    // `ids` lists every reachable service; `items` only the detailed rows.
+    reachableIds = Object.values(result.reachable_services)
+      .flatMap(row => row.ids && row.ids.length ? row.ids : row.items.map(i => i.id));
     map.getSource('accessibility').setData(result.geometry);
     map.getSource('origin').setData({
       type: 'FeatureCollection',
@@ -238,6 +311,7 @@ async function calculate() {
     refreshServiceLayers();
     renderProfile(result);
     renderNetworkCard(result);
+    if ($('compare-details').open) renderComparison();
   } catch (error) {
     lastResult = null;
     reachableIds = [];
@@ -273,10 +347,14 @@ function renderProfile(result) {
     return `<span class="${ok ? 'yes' : 'no'}">${ok ? '✓' : '✗'} ${escapeHtml(meta.label)}</span>`;
   }).join('');
 
+  const modeMeta = modes.find(m => m.mode === result.mode) || { label: result.mode_label || result.mode };
+  const how = result.mode === 'transit'
+    ? `leaving ${escapeHtml((result.departure_time || '').slice(11, 16))} · ${escapeHtml(result.service_date || '')} · max ${result.max_transfers} transfer${result.max_transfers === 1 ? '' : 's'}`
+    : `${result.speed_kmh ?? result.walking_speed_kmh} km/h along the ${result.mode === 'bike' ? 'cycling' : 'walking'} network`;
   $('profile').innerHTML = `
     <h2>${result.minutes} minutes from here</h2>
-    <p class="sub">${result.origin.lat.toFixed(5)}, ${result.origin.lon.toFixed(5)} ·
-       ${result.walking_speed_kmh} km/h · along the walking network</p>
+    <p class="sub"><b style="color:${escapeAttr(currentColor())}">${escapeHtml(modeMeta.label)}</b> ·
+       ${result.origin.lat.toFixed(5)}, ${result.origin.lon.toFixed(5)} · ${how}</p>
     ${list}
     <div style="border-top:1px solid #252b31;margin:12px 0 10px"></div>
     <div class="complete">${marks}</div>
@@ -288,19 +366,78 @@ function renderProfile(result) {
 }
 
 function renderNetworkCard(result) {
-  const km = (result.network.reachable_edge_length_m / 1000).toFixed(1);
-  const detours = result.euclidean_vs_network.map(row =>
+  const p = result.provenance || {};
+  const rows = [
+    ['Mode', escapeHtml(result.mode_label || result.mode)],
+    ['Snapped to network', `${num(result.snapped_origin.snap_distance_m)} m`],
+    ['Routing', escapeHtml(p.routing_method || '')],
+    ['Network source', escapeHtml(p.network_source || '')],
+  ];
+  if (result.mode === 'transit') {
+    const t = result.transit || {};
+    rows.push(
+      ['Departure', escapeHtml((result.departure_time || '').replace('T', ' '))],
+      ['Service date', escapeHtml(result.service_date || '')],
+      ['Max transfers', result.max_transfers],
+      ['Stops in walking range', num(t.stops_in_walking_range || 0)],
+      ['Stops reached', num(t.stops_reached || 0)],
+      ['Reached by vehicle', num(t.stops_reached_by_vehicle || 0)],
+      ['Routes used', (t.routes_used || []).length],
+      ['Walk-only nodes', num(result.network.walk_only_node_count || 0)],
+      ['Timetable', escapeHtml((p.transit || {}).feed_version || (p.transit || {}).source || '')],
+    );
+  } else {
+    rows.push(
+      ['Speed', `${result.speed_kmh ?? result.walking_speed_kmh} km/h`],
+      ['Distance budget', `${num(result.network.distance_budget_m)} m`],
+      ['Reachable nodes', num(result.network.reachable_node_count)],
+      ['Reachable edges', num(result.network.reachable_edge_count)],
+      ['Reachable network', `${(result.network.reachable_edge_length_m / 1000).toFixed(1)} km`],
+    );
+    if (result.reachable_entities) {
+      rows.push(['Neighbourhoods touched', result.reachable_entities.areas.length],
+                ['Accidents in reach', num(result.reachable_entities.accident_count)]);
+    }
+  }
+  const detours = (result.euclidean_vs_network || []).map(row =>
     `<div class="metric"><span>${escapeHtml(row.label)} detour</span><b>${row.network_detour_factor}×</b></div>`).join('');
+  const routes = result.mode === 'transit' && (result.transit || {}).routes_used
+    ? `<p class="muted small" style="margin:8px 0 0">${result.transit.routes_used.map(r => escapeHtml(r.label)).join(' · ')}</p>`
+    : '';
   const notes = (result.notes || []).map(n => `<p class="muted small">⚠︎ ${escapeHtml(n)}</p>`).join('');
-  $('network-card').innerHTML = `
-    <div class="metric"><span>Snapped to network</span><b>${num(result.snapped_origin.snap_distance_m)} m</b></div>
-    <div class="metric"><span>Distance budget</span><b>${num(result.network.distance_budget_m)} m</b></div>
-    <div class="metric"><span>Reachable nodes</span><b>${num(result.network.reachable_node_count)}</b></div>
-    <div class="metric"><span>Reachable edges</span><b>${num(result.network.reachable_edge_count)}</b></div>
-    <div class="metric"><span>Reachable streets</span><b>${km} km</b></div>
-    <div class="metric"><span>Neighbourhoods touched</span><b>${result.reachable_entities.areas.length}</b></div>
-    <div class="metric"><span>Accidents in reach</span><b>${num(result.reachable_entities.accident_count)}</b></div>
-    ${detours}${notes}`;
+  $('network-card').innerHTML =
+    rows.map(([k, v]) => `<div class="metric"><span>${k}</span><b>${v}</b></div>`).join('') +
+    detours + routes + notes;
+}
+
+// --- mode comparison ---------------------------------------------------------
+$('compare-details').addEventListener('toggle', () => {
+  if ($('compare-details').open) renderComparison();
+});
+
+async function renderComparison() {
+  if (!origin) return;
+  const card = $('compare-card');
+  card.innerHTML = '<p class="muted small">Comparing…</p>';
+  try {
+    const params = new URLSearchParams({ lat: origin.lat, lon: origin.lon, minutes });
+    if (departureValue()) params.set('departure_time', departureValue());
+    const data = await get('/accessibility/compare?' + params);
+    const keys = Object.keys(data.modes);
+    const head = keys.map(k => `<th style="color:${escapeAttr(data.modes[k].color)}">${escapeHtml(data.modes[k].label)}</th>`).join('');
+    const body = categories.filter(c => c.essential).map(c => {
+      const cells = keys.map(k => `<td>${num(data.table[c.category]?.[k] ?? 0)}</td>`).join('');
+      return `<tr><td>${escapeHtml(c.label)}</td>${cells}</tr>`;
+    }).join('');
+    const complete = keys.map(k =>
+      `<td>${data.modes[k].completeness.reachable_count}/${data.modes[k].completeness.total}</td>`).join('');
+    card.innerHTML = `<table class="compare"><thead><tr><th>${minutes} min</th>${head}</tr></thead>
+      <tbody>${body}<tr class="total"><td>categories reachable</td>${complete}</tr></tbody></table>
+      <p class="muted small" style="margin:8px 0 0">Counts of reachable services per essential category.
+      Transit leaves at ${escapeHtml((data.modes.transit || {}).departure_time?.slice(11, 16) || '—')}.</p>`;
+  } catch (error) {
+    card.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+  }
 }
 
 async function renderDataCard() {
@@ -333,7 +470,7 @@ function focusCategory(category) {
 
 async function selectService(serviceId) {
   const reached = lastResult
-    ? Object.values(lastResult.reachable_services).flatMap(r => r.items).find(i => i.id === serviceId)
+    ? Object.values(lastResult.reachable_services).flatMap(r => r.items || []).find(i => i.id === serviceId)
     : null;
   let service = reached;
   if (!service) {
@@ -350,9 +487,11 @@ async function selectService(serviceId) {
   const link = provenance.source_url
     ? `<a href="${escapeAttr(provenance.source_url)}" target="_blank" rel="noopener">${escapeHtml(provenance.source)}</a>`
     : escapeHtml(provenance.source);
+  const travelMinutes = reached ? (reached.travel_time_minutes ?? reached.walking_time_minutes) : null;
+  const distance = reached ? (reached.travel_distance_m ?? reached.walking_distance_m) : null;
   const timing = reached
-    ? `<div class="metric"><span>Walking time</span><b>${reached.walking_time_minutes} min</b></div>
-       <div class="metric"><span>Network distance</span><b>${num(reached.walking_distance_m)} m</b></div>`
+    ? `<div class="metric"><span>Travel time</span><b>${travelMinutes} min</b></div>` +
+      (distance != null ? `<div class="metric"><span>Network distance</span><b>${num(distance)} m</b></div>` : '')
     : `<p class="muted small">Not within the current ${minutes}-minute budget${origin ? '' : ' (no origin selected yet)'}.</p>`;
   const attributes = Object.entries(service.attributes || {})
     .map(([k, v]) => `<div class="metric"><span>${escapeHtml(k)}</span><b>${escapeHtml(v)}</b></div>`).join('');
@@ -366,15 +505,61 @@ async function selectService(serviceId) {
     <div class="metric"><span>Dataset</span><b class="small">${escapeHtml(provenance.dataset)}</b></div>
     <div class="metric"><span>Retrieved</span><b class="small">${escapeHtml(provenance.retrieved_at || '—')}</b></div>
     ${attributes}
+    <div id="itinerary"></div>
   </div>`;
 
   if (!origin) return;
   try {
-    const route = await get(`/accessibility/walk/route?lat=${origin.lat}&lon=${origin.lon}&service_id=${encodeURIComponent(serviceId)}`);
+    const route = await get(routeUrl(serviceId));
     map.getSource('route').setData(route.geometry);
+    if (route.journey) $('itinerary').innerHTML = renderItinerary(route);
   } catch (error) {
     map.getSource('route').setData(EMPTY);
+    $('itinerary').innerHTML = `<p class="muted small">${escapeHtml(error.message)}</p>`;
   }
+}
+
+function routeUrl(serviceId) {
+  const params = new URLSearchParams({ lat: origin.lat, lon: origin.lon, service_id: serviceId });
+  if (mode === 'transit') {
+    if (departureValue()) params.set('departure_time', departureValue());
+    params.set('minutes', Math.max(60, minutes));
+    return '/accessibility/transit/route?' + params;
+  }
+  return `/accessibility/${mode}/route?` + params;
+}
+
+// A journey a person can read: walk, board, wait, ride, exit, walk.
+function renderItinerary(route) {
+  const j = route.journey;
+  if (!j) return '';
+  if (!j.uses_transit) {
+    return `<p class="muted small" style="margin:10px 0 0">${j.total_minutes} min on foot — no transit needed.</p>`;
+  }
+  const steps = j.steps.map(step => {
+    switch (step.kind) {
+      case 'walk':
+        return `<div class="step"><b>Walk</b> ${step.minutes} min <span class="when">${escapeHtml(step.detail || '')}</span></div>`;
+      case 'transfer_walk':
+        return `<div class="step"><b>Walk</b> ${step.minutes} min <span class="when">${escapeHtml(step.from)} → ${escapeHtml(step.to)}</span></div>`;
+      case 'board':
+        return `<div class="step board"><b>Board</b> ${escapeHtml(step.stop)}<br>
+                <span class="when">${escapeHtml(step.route)}${step.headsign ? ' → ' + escapeHtml(step.headsign) : ''} · ${escapeHtml((step.departure || '').slice(0, 5))}</span></div>`;
+      case 'wait':
+        return `<div class="step"><b>Wait</b> ${step.minutes} min</div>`;
+      case 'ride':
+        return `<div class="step ride"><b>Ride</b> ${escapeHtml(step.route)} · ${step.minutes} min <span class="when">${step.stops} stop${step.stops === 1 ? '' : 's'}</span></div>`;
+      case 'exit':
+        return `<div class="step exit"><b>Exit</b> ${escapeHtml(step.stop)} <span class="when">${escapeHtml((step.arrival || '').slice(0, 5))}</span></div>`;
+      default:
+        return '';
+    }
+  }).join('');
+  return `<div class="metric" style="margin-top:10px"><span>Journey</span>
+      <b>${j.total_minutes} min · ${j.transfers} transfer${j.transfers === 1 ? '' : 's'}</b></div>
+    <div class="metric"><span>walk / wait / ride</span>
+      <b>${j.walking_minutes} / ${j.waiting_minutes} / ${j.transit_minutes} min</b></div>
+    <div class="itinerary">${steps}</div>`;
 }
 
 async function inspect(id) {

@@ -1,6 +1,21 @@
-# Walking accessibility
+# Accessibility
 
-A street graph represents intersections and path vertices as nodes and walkable connections as edges.
+Three modes answer the same question — *what can I reach from here in this much time?* — with three
+cost models:
+
+```text
+Walk      network distance / 4.8 km/h
+Bike      network distance / 15 km/h        (a different graph; see CYCLING.md)
+Transit   walk + wait + ride + transfer + walk, against the real timetable (see TRANSIT.md)
+```
+
+All three return the same shape — origin, budget, mode, reachable services by category, nearest per
+category, completeness, provenance — which is what makes them comparable at
+`/accessibility/compare`. What follows describes the street modes; transit has its own page.
+
+## Walking and cycling
+
+A street graph represents intersections and path vertices as nodes and usable connections as edges.
 Every edge carries a length in metres, computed in EPSG:2056. For a request the service:
 
 1. validates the coordinates and snaps the click to its nearest network node, in projected metres;
@@ -18,7 +33,9 @@ Step 5 is a dictionary lookup, not a search: the service index keeps an `access 
 so the cost of answering "what can I reach?" is proportional to the reachable set, not to the catalogue.
 See [the services guide](SERVICES.md) for the categories, their sources and how they attach.
 
-At the default **4.8 km/h**, 5 / 10 / 15 minutes are maximum routed distances of 400 / 800 / 1,200 m.
+At the default **4.8 km/h**, 5 / 10 / 15 / 30 minutes are maximum routed distances of
+400 / 800 / 1,200 / 2,400 m. Cycling at 15 km/h turns the same budgets into
+1,250 / 2,500 / 3,750 / 7,500 m over the bicycle graph.
 These are network budgets, not circle radii. `euclidean_vs_network` reports straight-line distance, routed
 distance and detour factor for each category's *nearest* service, so the difference is measurable rather
 than implied.
@@ -44,6 +61,10 @@ and is labelled `NOT reachability` in its own properties.
 | Small disconnected component | `snapped_origin.component_size` is reported and a note is added |
 | Edge with a missing or unusable length | Rebuilt from projected node positions, or dropped and counted |
 | Empty network | HTTP 503 `empty_network` |
+| Unknown travel mode | HTTP 404 `unknown_mode`, listing the known ones |
+| Transit asked for with no timetable prepared | HTTP 503 `transit_unavailable` |
+| Unreadable departure time | HTTP 422 `invalid_departure` |
+| Departure date outside the feed | answered on the nearest covered date, stated in `notes` |
 | Unknown service category | HTTP 404 `unknown_category`, listing the known ids |
 | Unknown service id | HTTP 404 `unknown_service` |
 | Route to a service that is not attached to the network | HTTP 422 `unroutable_service` |
@@ -59,4 +80,6 @@ point along an edge; the snap distance is reported so a client can show it, as t
 
 The completeness indicator counts categories, not quality: one kiosk counts the same as a supermarket,
 and a category with a single reachable location scores exactly like one with twenty. It is labelled a
-prototype wherever it appears, and its definition ships inside the response.
+prototype wherever it appears, and its definition ships inside the response. It is computed
+independently for each mode, so "5/6 walking, 6/6 cycling" is two honest statements rather than one
+blended score.

@@ -1,27 +1,30 @@
 # 15-Minute Basel
 
-Click anywhere in Basel, pick 5, 10 or 15 minutes, and see **what everyday life you can actually
-reach on foot** — routed along the real OpenStreetMap pedestrian network, not drawn as a circle.
+Click anywhere in Basel, pick a travel mode and a time budget, and see **what everyday life you can
+actually reach** — routed along the real OpenStreetMap pedestrian and bicycle networks and the
+official Swiss timetable, never drawn as a circle.
 
 ```text
 15 minutes from Barfüsserplatz
 
-Schools       44    nearest 2.1 min — Schulhaus Mücke
-Groceries     25    nearest 0.2 min — Coop
-Pharmacies    18    nearest 4.2 min — cityapotheke
-Healthcare    42    nearest 1.1 min — Ultraschallpraxis Freie Strasse
-Parks         24    nearest 3.2 min — Park (unnamed)
-Sport         23    nearest 3.5 min — Gymnasium am Münsterplatz
+                  WALKING     CYCLING     WALK + TRANSIT
 
-6 / 6 essential categories reachable
+Groceries              25         154                 69
+Pharmacies             18          60                 36
+Healthcare             42          91                 58
+Schools                44         386                108
+Parks                  24         117                 48
+Sport                  23         218                 62
+
+categories reachable  6/6         6/6                6/6
 ```
 
 ```text
-V0    GIS graph              ✅
-V0.2  Real walking network   ✅
-V0.3  15-minute services     ✅
-V0.4  Multimodal transit     next
-V1    Spatial Graph API      later
+V0    GIS graph                          ✅
+V0.2  Real walking network               ✅
+V0.3  15-minute services                 ✅
+V0.4  Walking + Cycling + Transit        ✅
+V0.5  City-wide accessibility          next
 ```
 
 ## Quick start
@@ -35,7 +38,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-python -m app.prepare_data          # downloads and caches everything (~35 s, once)
+python -m app.prepare_data          # downloads and caches everything (~4 min, once)
 
 uvicorn app.main:app --reload
 ```
@@ -47,15 +50,22 @@ Then open <http://127.0.0.1:8000> (API docs at <http://127.0.0.1:8000/docs>).
 ```text
 Preparing Basel Spatial Graph...
 
-Preparing Basel walking network...
+Walking network
 
   source:  OpenStreetMap / OSMnx
   place:   Basel-Stadt, Switzerland
   nodes:   14,102
   edges:   19,258
   length:  884.1 km of walkable ways
-  CRS:     EPSG:4326 (distances computed in EPSG:2056)
   cached:  data/processed/basel_walking_network.graphml (written)
+
+Cycling network
+
+  source:  OpenStreetMap / OSMnx
+  nodes:   5,918
+  edges:   8,034
+  length:  584.0 km of cyclable ways
+  cached:  data/processed/basel_cycling_network.graphml (written)
 
 Preparing Basel entities (areas, schools, accidents)...
 
@@ -76,18 +86,37 @@ Services
   park          138  via osm      OpenStreetMap
   library        33  via osm      OpenStreetMap
 
-Snapping services to walking network...
-  done. 1,308 attached · 33 poor snaps · 19 not attached
+Service → walk network attachments
+  valid: 1,289   poor snaps: 33   not attached: 19
+Service → bike network attachments
+  valid: 1,289   poor snaps: 34   not attached: 19
 
   total:   1,308 service locations
   cached:  data/processed/basel_services.json (written)
 
-Data-quality report: data/processed/data_quality.json (13 warning(s))
+Transit
+
+  ... 1,437 stations inside the extraction box
+  ... 33,182,263 stop_times rows scanned, 200,696 local trips kept
+
+Stop → walking network attachments
+  valid: 283   poor snaps: 43   outside the walking network: 1,154
+  source:  opentransportdata.swiss
+  feed:    Swiss national timetable (GTFS 2020) (20260819)
+  stops:   1,437
+  routes:  246
+  trips:   200,696
+  service dates: 20251214 – 20261212 (covers today)
+  cached:  data/processed/basel_transit.npz (written)
+
+Data-quality report: data/processed/data_quality.json (18 warning(s))
 
 ----------------------------------------------------------
 status  streets:  LIVE
+status  bike:     LIVE
 status  entities: LIVE
 status  services: LIVE
+status  transit:  LIVE
 status  overall:  READY
 ----------------------------------------------------------
 ```
@@ -98,12 +127,26 @@ It exits `0` when everything is live and `1` when anything fell back to fixture 
 
 | In the app | What happens |
 |---|---|
-| Click the map | Routes the pedestrian network and builds a 15-minute profile for that spot |
-| 5 / 10 / 15 min | Recomputes network, service counts, nearest times and completeness |
+| **Walking / Cycling / Walk + Transit** | Switches the whole answer: network, counts, nearest times, completeness |
+| Click the map | Routes from that spot and builds the profile |
+| 5 / 10 / 15 / 30 min | Recomputes everything |
+| **Departure time** (transit only) | Re-runs against the timetable — miss the tram and the answer changes |
 | Tick a category | Shows or hides those POIs; reachable ones are bright, the rest stay faint |
-| Click a service | Its walking time, network distance, snap quality and full provenance — plus the shortest path drawn on the map |
+| Click a service | Its travel time, snap quality and provenance — plus the route drawn on the map, and for transit the full **walk → board → wait → ride → exit → walk** itinerary |
 | Click a category row | Jumps to that category's nearest service and routes to it |
+| **Compare all three modes** | The table above, for your origin and budget |
 | Straight-line radius | Overlays the dashed Euclidean circle, so *nearby* and *reachable* can be compared |
+
+## The three modes
+
+| Mode | Network | Cost model | Default |
+|---|---|---|---|
+| **Walking** | OSM pedestrian, 14,102 nodes / 884 km | network distance ÷ speed | 4.8 km/h |
+| **Cycling** | OSM bicycle, 5,918 nodes / 584 km — a genuinely different graph | network distance ÷ speed | 15 km/h |
+| **Walk + Transit** | pedestrian network + the Swiss timetable | walk + **wait** + ride + transfer + walk | 4.8 km/h walking, ≤ 1 transfer |
+
+Waiting is never assumed away, and a transit answer depends on when you leave.
+Details: [cycling](docs/CYCLING.md) · [transit](docs/TRANSIT.md).
 
 ## Service categories
 
@@ -154,27 +197,37 @@ Basel entities and several service categories come from the official
 | File | Contents | Written by |
 |---|---|---|
 | `data/processed/basel_walking_network.graphml` | Walking graph: nodes with lon/lat, edges with `length_m`, geometry, `highway`, `name`, OSM ids | `prepare_data` |
-| `data/processed/basel_services.json` | 1,308 normalized services **with their access node, snap distance and quality** | `prepare_data` |
+| `data/processed/basel_cycling_network.graphml` | The bicycle-accessible graph, same shape | `prepare_data` |
+| `data/processed/basel_transit.npz` | The Basel timetable subset: 1,437 stops, 246 routes, 200,696 trips (6 MB) | `prepare_data` |
+| `data/raw/gtfs/gtfs_ch.zip` | The 224 MB Swiss GTFS archive, kept so a re-extract need not re-download | `prepare_data` |
+| `data/processed/basel_services.json` | 1,308 normalized services **with a walk and a bike access node, snap distance and quality each** | `prepare_data` |
 | `data/processed/basel_entities.json` | Normalized areas / schools / accidents | `prepare_data` |
 | `data/processed/data_quality.json` | Generated counts, missing names, bad snaps, duplicates, warnings | `prepare_data` |
 | `data/raw/osmnx_cache/` | OSMnx's raw Overpass responses, so a `--refresh` is cheap | OSMnx |
 | `data/raw/*.json` | Raw Basel Open Data responses, for inspection | `prepare_data` |
 
-**The server never downloads anything.** `uvicorn` reads these caches at startup (~1.3 s) and then
-answers queries from memory. Restarting or `--reload` does not re-download or re-snap anything.
+**The server never downloads anything.** `uvicorn` reads these caches at startup (~1.8 s) and then
+answers queries from memory. Restarting or `--reload` does not re-download the OSM graphs, re-extract
+the 2.9 GB of GTFS, or re-snap anything.
 
 ## Refreshing, and forcing fixture mode
 
 ```bash
-python -m app.prepare_data --refresh          # re-download everything
-python -m app.prepare_data --network-only     # just the walking network
+python -m app.prepare_data --refresh          # re-download and re-extract everything
+python -m app.prepare_data --network-only     # just the two street networks
 python -m app.prepare_data --services-only    # just the service POIs
 python -m app.prepare_data --entities-only    # just the Basel entity datasets
+python -m app.prepare_data --transit-only     # just the timetable
 
 BASEL_GRAPH_FIXTURE=1 uvicorn app.main:app --reload       # synthetic everything, fully offline
 BASEL_SERVICE_SOURCE=fixture uvicorn app.main:app         # synthetic services, real streets
+BASEL_TRANSIT_SOURCE=fixture uvicorn app.main:app         # synthetic timetable
 BASEL_STREET_NETWORK_SOURCE=osmnx uvicorn app.main:app    # refuse to start without a live network
+BASEL_TRANSIT_SOURCE=gtfs uvicorn app.main:app            # refuse to start without a live timetable
 ```
+
+Tunable defaults: `BASEL_WALKING_SPEED_KMH`, `BASEL_CYCLING_SPEED_KMH`, `BASEL_MAX_TRANSFERS`,
+`BASEL_MIN_TRANSFER_SECONDS`, `BASEL_STOP_TRANSFER_RADIUS_M`.
 
 Service snapping is stored with a fingerprint of the network it was made against. Re-prepare the
 network alone and the next start re-snaps in memory rather than trusting stale node ids —
@@ -182,7 +235,7 @@ network alone and the next start re-snaps in memory rather than trusting stale n
 
 ## How to tell LIVE from FIXTURE
 
-- three header badges — green `streets / services / entities: live`, orange when fixture;
+- four header badges — green `streets / bike / transit / services: live`, orange when fixture;
 - the *Data sources & quality* panel, with per-category counts and every warning;
 - `GET /health`, `GET /data/status`, and `provenance.mode` in every accessibility response.
 
@@ -203,8 +256,25 @@ request with `walking_speed_kmh`, or globally with `BASEL_WALKING_SPEED_KMH`.
 ## API
 
 ```bash
-# the full answer: network geometry + services + completeness
+# one endpoint, three modes
+curl 'http://127.0.0.1:8000/accessibility?lat=47.5556&lon=7.5906&mode=walk&minutes=15'
+curl 'http://127.0.0.1:8000/accessibility?lat=47.5556&lon=7.5906&mode=bike&minutes=15'
+curl 'http://127.0.0.1:8000/accessibility?lat=47.5556&lon=7.5906&mode=transit&minutes=15&departure_time=14:30'
+
+# the comparison table
+curl 'http://127.0.0.1:8000/accessibility/compare?lat=47.5556&lon=7.5906&minutes=15&departure_time=14:30'
+
+# one readable itinerary: walk → board → wait → ride → exit → walk
+curl 'http://127.0.0.1:8000/accessibility/transit/route?lat=47.5556&lon=7.5906&service_id=...&departure_time=14:30'
+
+# the timetable itself
+curl 'http://127.0.0.1:8000/transit/status'
+curl 'http://127.0.0.1:8000/transit/routes'
+curl 'http://127.0.0.1:8000/transit/stops?q=Barf'
+
+# mode-specific endpoints (the V0.3 walking one is unchanged)
 curl 'http://127.0.0.1:8000/accessibility/walk?lat=47.5556&lon=7.5906&minutes=15'
+curl 'http://127.0.0.1:8000/accessibility/bike?lat=47.5556&lon=7.5906&minutes=15&cycling_speed_kmh=18'
 
 # just the profile — counts, nearest times, completeness; no geometry
 curl 'http://127.0.0.1:8000/accessibility/walk/services?lat=47.5556&lon=7.5906&minutes=15'
@@ -246,6 +316,7 @@ Response (abbreviated):
     "grocery": {
       "label": "Groceries", "essential": true, "count": 25,
       "nearest_minutes": 0.2, "nearest_name": "Coop", "prepared_total": 166,
+      "ids": ["service:grocery:osm:node:4437700046", "…"],
       "items": [{
         "id": "service:grocery:osm:node:4437700046",
         "category": "grocery", "name": "Coop",
@@ -263,14 +334,64 @@ Response (abbreviated):
     "missing_categories": [], "reachable_count": 6, "total": 6
   },
   "geometry": {"type": "FeatureCollection", "features": ["…"]},
-  "provenance": {"network_source": "OpenStreetMap / OSMnx", "mode": "live",
+  "provenance": {"travel_mode": "walk", "network_kind": "walk",
+                 "network_source": "OpenStreetMap / OSMnx", "mode": "live",
+                 "routing_method": "network distance / 4.8 km/h",
                  "services_mode": "live", "algorithm": "NetworkX single-source Dijkstra"}
 }
 ```
 
+A transit answer adds the parts that only transit has:
+
+```json
+{
+  "mode": "transit",
+  "departure_time": "2026-08-20T14:30+02:00",
+  "service_date": "2026-08-20",
+  "service_date_is_requested_date": true,
+  "max_transfers": 1,
+  "transit": {
+    "stops_in_walking_range": 28, "stops_reached": 93, "stops_reached_by_vehicle": 80,
+    "routes_used": [{"label": "Tram 11", "vehicle": "Tram", "agency": "Basler Verkehrsbetriebe"}]
+  },
+  "reachable_services": {"pharmacy": {"items": [{
+    "display_name": "Wettstein Apotheke", "travel_time_minutes": 9.1,
+    "journey": {
+      "uses_transit": true, "total_minutes": 9.1,
+      "walking_minutes": 5.0, "waiting_minutes": 1.2, "transit_minutes": 3.0, "transfers": 0,
+      "routes": ["Tram 2"],
+      "boarding_stop": {"name": "Basel, Bankverein"},
+      "exit_stop": {"name": "Basel, Wettsteinplatz"},
+      "steps": [
+        {"kind": "walk",  "minutes": 3.8, "detail": "to the stop"},
+        {"kind": "board", "stop": "Basel, Bankverein", "route": "Tram 2",
+         "headsign": "Riehen, Grenze", "departure": "14:35:00"},
+        {"kind": "wait",  "minutes": 1.2},
+        {"kind": "ride",  "route": "Tram 2", "minutes": 3.0, "stops": 2},
+        {"kind": "exit",  "stop": "Basel, Wettsteinplatz", "arrival": "14:38:00"},
+        {"kind": "walk",  "minutes": 1.1, "detail": "to the destination"}
+      ]
+    }
+  }]}},
+  "provenance": {
+    "travel_mode": "transit",
+    "routing_method": "walk + wait + ride + transfer + walk",
+    "algorithm": "walk Dijkstra + RAPTOR (round-based transit search) + walk Dijkstra",
+    "timezone": "Europe/Zurich", "max_transfers": 1, "walking_speed_kmh": 4.8,
+    "transit": {"source": "opentransportdata.swiss", "feed_version": "20260819",
+                "retrieved_at": "2026-08-20T…"}
+  }
+}
+```
+
+Every category row carries **`ids`** (every reachable service, for map highlighting) and **`items`**
+(the detailed rows, capped at 60 per category — raise it with `service_limit`).
+
 Every geometry feature carries a `kind`: `reachable_edge` (the authoritative answer),
-`straight_line_radius` (Euclidean, for comparison only) and, with `include_buffer=true`,
-`network_buffer` (an explicitly approximate polygon).
+`straight_line_radius` (Euclidean, for comparison only), `network_buffer` (with
+`include_buffer=true`, explicitly approximate) and, in transit mode, `transit_segment` and
+`transit_stop` for the rides actually taken and the stops they reached. A route response adds
+`walk_leg`, `transit_leg`, `transfer_leg` and `walk_leg_final`.
 
 Errors are JSON, not stack traces:
 
@@ -294,11 +415,22 @@ cut short by the Rhine, the rail corridor and the motorway. Each category's near
 pytest
 ```
 
-190 tests, all deterministic and fully offline — the suite blocks socket connections outright and
-routes over tiny hand-built graphs, so it never depends on OpenStreetMap or data.bs.ch being reachable.
+270 tests, all deterministic and fully offline — the suite blocks socket connections outright and
+routes over tiny hand-built graphs and a four-stop synthetic timetable, so it never depends on
+OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 
 ## Known limitations
 
+- **Cycling is a prototype cost model**: `distance ÷ 15 km/h`. No slope, traffic stress, cycle-lane
+  preference, surface, turn penalties or one-way rules — Bruderholz is a real climb and the model
+  does not know. See [docs/CYCLING.md](docs/CYCLING.md).
+- **Transit is static GTFS**: no realtime, no delays, no disruptions. Ride segments are drawn as
+  straight lines between stops (the times are exact, the drawn line is schematic).
+- **One transfer by default** (`max_transfers`, up to 3). No bike + transit, no fares, no step-free
+  routing.
+- **You can ride past the walking network but not board there.** The timetable box reaches Lörrach,
+  Liestal and Saint-Louis; the pedestrian network is canton-only, so 283 of 1,437 stations can be
+  boarded from. Every prepared service is inside the canton, so nothing reachable is lost.
 - **POI completeness is the weak link.** OSM covers central Basel groceries and pharmacies well;
   doctors' practices are patchy. A missing POI looks exactly like a genuine accessibility gap.
 - **Coverage is the canton of Basel-Stadt** (city + Riehen + Bettingen). Clicking in Germany or
@@ -320,5 +452,7 @@ routes over tiny hand-built graphs, so it never depends on OpenStreetMap or data
 
 ## Documentation
 
-[Concept](docs/CONCEPT.md) · [Architecture](docs/ARCHITECTURE.md) · [Services](docs/SERVICES.md) ·
-[Data & provenance](docs/DATA.md) · [Accessibility model](docs/ACCESSIBILITY.md)
+[Concept](docs/CONCEPT.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[Accessibility model](docs/ACCESSIBILITY.md) · [Services](docs/SERVICES.md) ·
+[Cycling](docs/CYCLING.md) · [Transit](docs/TRANSIT.md) · [Data & provenance](docs/DATA.md) ·
+[City2Graph evaluation](docs/CITY2GRAPH.md)

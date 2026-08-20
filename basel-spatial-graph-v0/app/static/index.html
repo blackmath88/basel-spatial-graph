@@ -24,6 +24,25 @@ main{height:calc(100vh - 58px);display:grid;grid-template-columns:1fr 400px}
 .controls{display:flex;gap:6px;margin:4px 0 10px}
 .controls button{flex:1;background:#20262d;color:#e8e9ea;border:1px solid #343c46;border-radius:7px;padding:8px 10px;cursor:pointer}
 .controls button.active{background:#2368d8;border-color:#4f8cf0}
+.controls.modes{margin-bottom:12px}
+.controls.modes button{font-size:13px;padding:8px 6px}
+.controls.modes button.active{background:var(--mode,#2368d8);border-color:var(--mode,#4f8cf0);color:#0d0f12;font-weight:600}
+.departure{display:flex;align-items:center;gap:8px;margin:-4px 0 10px}
+.departure label{color:#9ba5b1;font-size:13px}
+.departure input{background:#20262d;color:#e8e9ea;border:1px solid #343c46;border-radius:7px;padding:6px 8px;font:inherit}
+.itinerary{margin-top:8px;border-left:2px solid #343c46;padding-left:12px}
+.step{padding:5px 0;position:relative}
+.step::before{content:"";position:absolute;left:-17px;top:11px;width:8px;height:8px;border-radius:50%;background:#343c46}
+.step.ride::before{background:var(--mode-transit,#c792ea)}
+.step.board::before,.step.exit::before{background:#e8e9ea}
+.step b{font-weight:600}
+.step .when{color:#9ba5b1;font-size:12px}
+table.compare{width:100%;border-collapse:collapse;font-size:13px}
+table.compare th{text-align:right;color:#9ba5b1;font-weight:500;padding:4px 2px;font-size:12px}
+table.compare th:first-child{text-align:left}
+table.compare td{text-align:right;padding:4px 2px;font-variant-numeric:tabular-nums}
+table.compare td:first-child{text-align:left;color:#9ba5b1}
+table.compare tr.total td{border-top:1px solid #343c46;padding-top:6px}
 .presets{display:flex;gap:6px;flex-wrap:wrap}
 .presets button{background:transparent;color:#9ba5b1;border:1px dashed #343c46;border-radius:7px;padding:5px 9px;cursor:pointer;font-size:12px}
 .presets button:hover{color:#e8e9ea;border-color:#4f8cf0}
@@ -75,19 +94,28 @@ a{color:#6ea8ff}
   <div><b>15-Minute Basel</b><small>What can you actually reach on foot?</small></div>
   <div id="status">
     <span class="badge" id="badge-streets">streets: …</span>
+    <span class="badge" id="badge-bike">bike: …</span>
+    <span class="badge" id="badge-transit">transit: …</span>
     <span class="badge" id="badge-services">services: …</span>
-    <span class="badge" id="badge-entities">entities: …</span>
   </div>
 </header>
 <main>
   <div id="map"></div>
   <aside class="panel">
     <div class="card">
-      <b>Walking time</b>
+      <b>Travel mode</b>
+      <div class="controls modes" id="mode-controls"></div>
+      <b>Time</b>
       <div class="controls">
-        <button data-min="5">5 min</button>
-        <button data-min="10">10 min</button>
-        <button data-min="15" class="active">15 min</button>
+        <button data-min="5">5</button>
+        <button data-min="10">10</button>
+        <button data-min="15" class="active">15</button>
+        <button data-min="30">30</button>
+      </div>
+      <div id="departure-row" class="departure" hidden>
+        <label for="departure">Departure</label>
+        <input type="time" id="departure" step="300">
+        <span class="muted small" id="departure-note"></span>
       </div>
       <p class="muted small" style="margin:0 0 8px">Click anywhere in Basel, or jump to:</p>
       <div class="presets">
@@ -108,7 +136,7 @@ a{color:#6ea8ff}
     <div class="card">
       <b>Services on the map</b>
       <div class="toggles" id="toggles"></div>
-      <div class="legend"><i class="swatch"></i> reachable walking network</div>
+      <div class="legend"><i class="swatch" id="network-swatch"></i> <span id="network-legend">reachable walking network</span></div>
       <div class="legend"><i class="swatch dashed"></i>
         <label class="toggle"><input type="checkbox" id="straight-line"> straight-line radius</label>
       </div>
@@ -117,8 +145,14 @@ a{color:#6ea8ff}
       </div>
     </div>
 
+    <details id="compare-details">
+      <summary>Compare all three modes</summary>
+      <div class="card" id="compare-card"><p class="muted small">Pick an origin, then open this to
+        see the same question answered by walking, cycling and transit.</p></div>
+    </details>
+
     <details id="network-details">
-      <summary>Walking network &amp; debug</summary>
+      <summary>Network &amp; routing detail</summary>
       <div class="card" id="network-card"><p class="muted small">No origin selected.</p></div>
     </details>
 

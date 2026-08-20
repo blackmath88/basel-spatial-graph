@@ -17,39 +17,53 @@ GRID_LONS = [7.574 + i * 0.006 for i in range(7)]
 GRID_LATS = [47.550 + j * 0.004 for j in range(5)]
 
 
+NODE_PREFIX = {"walk": "fixture", "bike": "bike"}
+EDGE_TYPE = {"walk": "WALKABLE_TO", "bike": "CYCLABLE_TO"}
+
+
 class FixtureWalkingNetworkSource(WalkingNetworkSource):
     name = "synthetic fixture"
 
-    def __init__(self, reason: Optional[str] = None):
+    def __init__(self, reason: Optional[str] = None, kind: str = "walk"):
         self.reason = reason
+        self.kind = kind
 
     def load(self) -> StreetNetwork:
+        prefix = NODE_PREFIX.get(self.kind, self.kind)
+        edge_type = EDGE_TYPE.get(self.kind, "WALKABLE_TO")
         graph = nx.Graph()
         for j, lat in enumerate(GRID_LATS):
             for i, lon in enumerate(GRID_LONS):
-                graph.add_node(f"fixture:{i}:{j}", lon=lon, lat=lat, type="StreetNode")
+                graph.add_node(f"{prefix}:{i}:{j}", lon=lon, lat=lat, type="StreetNode")
         for j in range(len(GRID_LATS)):
             for i in range(len(GRID_LONS)):
-                here = f"fixture:{i}:{j}"
+                here = f"{prefix}:{i}:{j}"
                 for ni, nj in ((i + 1, j), (i, j + 1)):
                     if ni >= len(GRID_LONS) or nj >= len(GRID_LATS):
                         continue
-                    # A synthetic barrier at x=3, crossed only on rows 1 and 4:
-                    # it keeps "near but not reachable" testable.
-                    if ni == 3 and i == 2 and j not in {1, 4}:
+                    # The walking barrier at x=3, crossed only on rows 1 and 4.
+                    # Bicycles have the crossing the footpath network lacks.
+                    if self.kind == "walk" and ni == 3 and i == 2 and j not in {1, 4}:
                         continue
-                    there = f"fixture:{ni}:{nj}"
+                    there = f"{prefix}:{ni}:{nj}"
                     a, b = graph.nodes[here], graph.nodes[there]
                     geom = LineString([(a["lon"], a["lat"]), (b["lon"], b["lat"])])
-                    graph.add_edge(here, there, geom=geom, type="WALKABLE_TO", highway="fixture_path")
+                    graph.add_edge(here, there, geom=geom, type=edge_type,
+                                   highway=f"fixture_{self.kind}_path")
         provenance = make_provenance(
             mode=FIXTURE,
             source=self.name,
-            dataset="Synthetic Basel-centred walking grid",
+            dataset=f"Synthetic Basel-centred {self.kind} grid",
             license="fixture-only; not real observations",
+            network=self.kind,
         )
         return StreetNetwork(graph, provenance, self.reason)
 
 
-def fixture_street_network(reason: Optional[str] = None) -> StreetNetwork:
-    return FixtureWalkingNetworkSource(reason).load()
+class FixtureCyclingNetworkSource(FixtureWalkingNetworkSource):
+    def __init__(self, reason: Optional[str] = None):
+        super().__init__(reason, kind="bike")
+
+
+def fixture_street_network(reason: Optional[str] = None, kind: str = "walk") -> StreetNetwork:
+    return FixtureWalkingNetworkSource(reason, kind).load()

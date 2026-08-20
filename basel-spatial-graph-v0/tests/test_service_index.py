@@ -6,7 +6,7 @@ from shapely.geometry import LineString, Polygon
 from app.errors import UnknownCategoryError
 from app.service_index import ServiceIndex, index_from_payload, snap_services
 from app.service_model import ESSENTIAL_CATEGORIES, ServiceCategory, ServiceLocation
-from app.service_sources import fixture_services, network_fingerprint
+from app.service_sources import fixture_services, network_fingerprints
 from app.street_sources.base import StreetNetwork, make_provenance
 
 SPEED = 4.8
@@ -232,18 +232,36 @@ def test_optional_categories_never_affect_completeness():
 
 
 # --- cache-backed construction -----------------------------------------------
-def test_index_reuses_cached_snapping_when_the_network_matches(streets):
-    services = snap_services(streets, fixture_services())
+def test_index_reuses_cached_snapping_when_the_networks_match(streets, bike_network):
+    networks = {"walk": streets, "bike": bike_network}
+    services = fixture_services()
+    for name, network in networks.items():
+        snap_services(network, services, network=name)
     payload = {"services": services, "mode": "live",
-               "network_fingerprint": network_fingerprint(streets)}
-    index = index_from_payload(payload, streets)
-    assert index.resnapped is False
+               "network_fingerprints": network_fingerprints(networks)}
+    index = index_from_payload(payload, networks)
+    assert index.resnapped == ()
     assert index.mode == "live"
 
 
-def test_index_resnaps_when_the_network_changed(streets):
+def test_index_resnaps_only_the_network_that_changed(streets, bike_network):
+    networks = {"walk": streets, "bike": bike_network}
     services = fixture_services()
-    payload = {"services": services, "mode": "live", "network_fingerprint": "stale"}
-    index = index_from_payload(payload, streets)
-    assert index.resnapped is True
-    assert all(s.access_node_id for s in index.services if s.is_routable)
+    snap_services(streets, services, network="walk")
+    payload = {"services": services, "mode": "live",
+               "network_fingerprints": {"walk": network_fingerprints(networks)["walk"],
+                                        "bike": "stale"}}
+    index = index_from_payload(payload, networks)
+    assert index.resnapped == ("bike",)
+    assert all(s.access_for("bike").node_id for s in index.services if s.is_routable_on("bike"))
+
+
+def test_a_v03_cache_resnaps_the_new_bike_network(streets, bike_network):
+    """The old cache never saw a bicycle network, so that one must be built."""
+    networks = {"walk": streets, "bike": bike_network}
+    services = fixture_services()
+    snap_services(streets, services, network="walk")
+    payload = {"services": services, "mode": "live",
+               "network_fingerprint": network_fingerprints(networks)["walk"]}
+    index = index_from_payload(payload, networks)
+    assert index.resnapped == ("bike",)

@@ -58,3 +58,27 @@ class UnknownServiceError(BaselGraphError):
 class UnroutableServiceError(BaselGraphError):
     status_code = 422
     code = "unroutable_service"
+
+
+class UnknownModeError(BaselGraphError):
+    status_code = 404
+    code = "unknown_mode"
+
+
+class TransitUnavailableError(BaselGraphError):
+    """Raised when transit routing is asked for but no timetable is prepared."""
+
+    status_code = 503
+    code = "transit_unavailable"
+
+
+class InvalidDepartureError(BaselGraphError):
+    status_code = 422
+    code = "invalid_departure"
+
+
+class TransitSourceError(BaselGraphError):
+    """Raised by a timetable source that could not produce records."""
+
+    status_code = 503
+    code = "transit_source_unavailable"

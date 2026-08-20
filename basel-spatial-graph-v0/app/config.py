@@ -32,9 +32,13 @@ SERVICE_CACHE = PROCESSED_DIR / "basel_services.json"
 # Generated data-quality report.
 DATA_QUALITY_REPORT = PROCESSED_DIR / "data_quality.json"
 
-# --- Walking network ---------------------------------------------------------
-# Cached, normalized pedestrian network. Written by `python -m app.prepare_data`.
+# --- Travel modes ---------------------------------------------------------
+# Cached, normalized networks. Written by `python -m app.prepare_data`.
 WALK_NETWORK_CACHE = PROCESSED_DIR / "basel_walking_network.graphml"
+BIKE_NETWORK_CACHE = PROCESSED_DIR / "basel_cycling_network.graphml"
+NETWORK_CACHES = {"walk": WALK_NETWORK_CACHE, "bike": BIKE_NETWORK_CACHE}
+# OSMnx network types per prepared network.
+NETWORK_TYPES = {"walk": "walk", "bike": "bike"}
 # OSMnx keeps its own HTTP response cache here so repeated prepares are cheap.
 OSMNX_CACHE_DIR = RAW_DIR / "osmnx_cache"
 
@@ -46,14 +50,37 @@ BASEL_PLACE_QUERIES = (
     "Basel, Switzerland",
 )
 BASEL_BBOX = (47.5193, 7.5547, 47.6009, 7.6938)  # south, west, north, east
-OSMNX_NETWORK_TYPE = "walk"
 
 # CH1903+ / LV95: the official Swiss projected CRS, metres, correct for Basel.
 METRIC_CRS = "EPSG:2056"
 GEOGRAPHIC_CRS = "EPSG:4326"
 
+# --- Public transport -------------------------------------------------------
+# Official Swiss GTFS timetable. The permalink always resolves to the newest
+# publication of the current annual feed.
+GTFS_URL = "https://data.opentransportdata.swiss/dataset/timetable-2026-gtfs2020/permalink"
+GTFS_DATASET_URL = "https://data.opentransportdata.swiss/dataset/timetable-2026-gtfs2020"
+GTFS_ARCHIVE = RAW_DIR / "gtfs" / "gtfs_ch.zip"
+TRANSIT_CACHE = PROCESSED_DIR / "basel_transit.npz"
+
+# The prepared timetable area: Basel plus everything a short local journey can
+# plausibly reach — Baselland to Liestal/Rheinfelden, Lörrach and Weil am Rhein
+# in Germany, Saint-Louis in France. Deliberately wider than the canton, so a
+# 30-minute journey is not cut off at an administrative border.
+TRANSIT_BBOX = (47.42, 7.40, 47.68, 7.90)  # south, west, north, east
+
+# Changing vehicles at the same stop costs this much platform time.
+MIN_TRANSFER_SECONDS = int(os.getenv("BASEL_MIN_TRANSFER_SECONDS", "90"))
+# Stops closer than this to each other are linked by a walking transfer.
+STOP_TRANSFER_RADIUS_M = float(os.getenv("BASEL_STOP_TRANSFER_RADIUS_M", "300"))
+DEFAULT_MAX_TRANSFERS = int(os.getenv("BASEL_MAX_TRANSFERS", "1"))
+
 # --- Accessibility model -----------------------------------------------------
 DEFAULT_WALKING_SPEED_KMH = float(os.getenv("BASEL_WALKING_SPEED_KMH", "4.8"))
+# Prototype cycling speed: a flat average over the whole ride, no slope, no
+# traffic stress, no surface penalty. See docs/CYCLING.md.
+DEFAULT_CYCLING_SPEED_KMH = float(os.getenv("BASEL_CYCLING_SPEED_KMH", "15.0"))
+DEFAULT_SPEEDS_KMH = {"walk": DEFAULT_WALKING_SPEED_KMH, "bike": DEFAULT_CYCLING_SPEED_KMH}
 # A click further than this from any walkable node is reported as an error
 # instead of silently snapping across the city.
 MAX_SNAP_DISTANCE_M = float(os.getenv("BASEL_MAX_SNAP_DISTANCE_M", "1000"))

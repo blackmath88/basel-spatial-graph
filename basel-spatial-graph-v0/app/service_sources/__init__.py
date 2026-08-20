@@ -16,7 +16,7 @@ from ..errors import BaselGraphError, ServiceSourceError
 from ..service_model import ServiceCategory, ServiceLocation
 from .base import ServiceSource, dedupe, duplicate_candidates
 from .basel_open_data import BaselOpenDataServiceSource
-from .cache import network_fingerprint, read_cache, write_cache
+from .cache import network_fingerprint, network_fingerprints, read_cache, write_cache
 from .fixture_source import FixtureServiceSource, fixture_services
 from .osm_source import OSMServiceSource
 
@@ -31,6 +31,7 @@ __all__ = [
     "fixture_services",
     "load_services",
     "network_fingerprint",
+    "network_fingerprints",
     "read_cache",
     "write_cache",
 ]
@@ -98,7 +99,7 @@ def load_services(force_fixture: bool = False, path=None, source: Optional[str] 
             "services": fixture_services(),
             "mode": "fixture",
             "fallback_reason": "Fixture mode requested",
-            "network_fingerprint": None,
+            "network_fingerprints": {},
             "generated_at": None,
             "errors": {},
         }
@@ -112,7 +113,7 @@ def load_services(force_fixture: bool = False, path=None, source: Optional[str] 
             "services": fixture_services(),
             "mode": "fixture",
             "fallback_reason": exc.message,
-            "network_fingerprint": None,
+            "network_fingerprints": {},
             "generated_at": None,
             "errors": {},
         }
@@ -121,7 +122,7 @@ def load_services(force_fixture: bool = False, path=None, source: Optional[str] 
             "services": fixture_services(),
             "mode": "fixture",
             "fallback_reason": str(exc),
-            "network_fingerprint": None,
+            "network_fingerprints": {},
             "generated_at": None,
             "errors": {},
         }

@@ -16,7 +16,7 @@ from ..service_model import ServiceLocation
 
 
 def network_fingerprint(streets) -> str:
-    """Changes whenever the walking network changes, invalidating snap results."""
+    """Changes whenever a network changes, invalidating that network's snaps."""
     return "{}:{}:{}".format(
         streets.graph.number_of_nodes(),
         streets.graph.number_of_edges(),
@@ -24,12 +24,21 @@ def network_fingerprint(streets) -> str:
     )
 
 
-def write_cache(services: Iterable[ServiceLocation], fingerprint: str, path=None,
+def network_fingerprints(networks: dict) -> dict:
+    """{network name: fingerprint} for every prepared street network."""
+    return {name: network_fingerprint(streets) for name, streets in networks.items()}
+
+
+def write_cache(services: Iterable[ServiceLocation], fingerprints, path=None,
                 errors: Optional[dict] = None) -> Path:
+    if isinstance(fingerprints, str):  # a single walking fingerprint
+        fingerprints = {"walk": fingerprints}
     path = Path(path or SERVICE_CACHE)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "network_fingerprint": fingerprint,
+        "network_fingerprints": dict(fingerprints),
+        # Kept so a V0.3 reader still finds the walking fingerprint it expects.
+        "network_fingerprint": fingerprints.get("walk"),
         "errors": errors or {},
         "services": [service.to_dict() for service in services],
     }
@@ -56,6 +65,7 @@ def read_cache(path=None) -> dict:
     return {
         "services": services,
         "network_fingerprint": payload.get("network_fingerprint"),
+        "network_fingerprints": payload.get("network_fingerprints") or {},
         "generated_at": payload.get("generated_at"),
         "errors": payload.get("errors", {}),
         "cache_path": str(path),

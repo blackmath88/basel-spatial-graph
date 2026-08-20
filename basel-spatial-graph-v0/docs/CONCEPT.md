@@ -2,15 +2,25 @@
 
 Traditional proximity asks “how close is it in a straight line?” Walking accessibility asks “how far is it through streets and paths I can use?” A river, railway, fenced site, or sparse crossing can make those answers very different.
 
-The model now has three complementary layers:
+The model now has four complementary layers:
 
 ```text
-ServiceLocation --ACCESS_POINT-> StreetNode      (8 everyday destination categories)
-StreetNode   --WALKABLE_TO----> StreetNode       (weighted by metres)
+ServiceLocation --ACCESS_POINT-> StreetNode      (8 everyday destination categories,
+                                                  once per network: walk and bike)
+StreetNode   --WALKABLE_TO----> StreetNode       (pedestrian graph, weighted by metres)
+BikeNode     --CYCLABLE_TO----> BikeNode         (bicycle graph, a different network)
+StreetNode   --WALK_TO_STOP---> TransitStop      (how you board)
+TransitStop  --scheduled trip-> TransitStop      (weighted by the timetable, not by metres)
 
 School   --IN_AREA------------> Area             (context entities and their relations)
 Accident --NEAR---------------> School           (Euclidean, retained and labeled)
 ```
+
+The fourth layer is the one that changes the nature of the question. Distance on a graph is a
+property of the graph; a departure at 14:34 is a property of *time*. Once the timetable is in, "what
+can I reach?" stops having a single answer and starts having an answer per moment — which is what
+the city actually feels like. The model keeps that visible rather than averaging it away: the
+walk, the wait, the ride and the final walk are reported separately, and they add up.
 
 Everyday destinations are one typed category model — `grocery`, `pharmacy`, `healthcare`, `school`,
 `park`, `sport`, `library`, `culture` — not eight special cases. Schools were the first of them and
@@ -26,6 +36,11 @@ public: a category counts as reachable when at least one of its locations is ins
 the resulting `5 / 6` is labelled a prototype indicator with its definition on screen. Counts alone
 mislead, so each category also reports its nearest service's walking time. No weighting, no rating,
 nothing the reader cannot re-derive from the response.
+
+Three modes then answer the same question with three cost models — distance ÷ speed for walking and
+cycling, and walk + wait + ride + transfer + walk for transit — and return the same shape, so they
+can be put side by side. The comparison is the point: it shows how much of "the 15-minute city"
+depends on which 15 minutes you mean.
 
 Once destinations exist, the query can be inverted: instead of asking what one origin reaches, ask
 where in the city a category is *not* reachable. One multi-source Dijkstra over the whole network

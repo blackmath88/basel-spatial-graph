@@ -4,9 +4,9 @@
                  PREPARE (once, explicit)                    SERVE (every start)
                  ─────────────────────────                   ───────────────────
 OpenStreetMap ──> street_sources/osmnx_source.py ──> basel_walking_network.graphml
-                    graph_from_place("walk")                        │
+                    graph_from_place("walk")        ──> basel_cycling_network.graphml
+                    graph_from_place("bike")                        │
                     MultiDiGraph -> undirected                      │
-                                                                    │
 data.bs.ch ─────> ingest.fetch_entities() ────────> basel_entities.json
                     paginate, normalize                             │
                                                                     │
@@ -15,25 +15,35 @@ OpenStreet- ├───> service_sources/*  ──> ServiceLocation ──┐  
 map         ┘      SOURCE_PLAN per category                │        │
                                                            v        │
                           service_index.snap_services() ───┴──> basel_services.json
-                            point -> nearest node                   │   (+ access nodes
-                            area  -> nearest outline point          │    + net fingerprint)
+                            once per network                        │   (+ walk & bike
+                            point -> nearest node                   │    access nodes
+                            area  -> nearest outline point          │    + fingerprints)
+                                                                    │
+opentransport ──> transit_sources/swiss_gtfs.py ──────────> basel_transit.npz
+data.swiss         stream 2.9 GB, keep the Basel box                │
                                                                     │
                           data_quality.build_report() ───> data_quality.json
                                                                     │
                                                                     v
-                                              app/main.py loads all three caches
-                              ┌──────────────────┬──────────────────┐
-                              v                  v                  v
-                        entity graph       StreetNetwork      ServiceIndex
-                         (graph.py)     (street_sources)   (service_index.py)
-                              └────────ACCESS_POINT────────┘        │
-                                              │                     │
-                                              v                     v
-                                       WalkingAccessibilityService  CityAnalysis
-                                        Dijkstra by length_m        multi-source Dijkstra
-                                              │                     │
-                                              v                     v
-                                       FastAPI GeoJSON + MapLibre UI
+                                              app/main.py loads every cache
+             ┌─────────────┬──────────────┬──────────────┬─────────────┐
+             v             v              v              v             v
+       entity graph  StreetNetwork  StreetNetwork  ServiceIndex   TransitIndex
+        (graph.py)      "walk"          "bike"    (per-network    (RAPTOR +
+                                                  access points)   stop access)
+             └────────ACCESS_POINT────────┴──────────────┘             │
+                             │                                         │
+        ┌────────────────────┼────────────────────┬────────────────────┘
+        v                    v                    v
+  WalkingAccessibility  CyclingAccessibility  MultimodalAccessibility
+   Dijkstra/length_m     Dijkstra/length_m     walk → RAPTOR → walk
+        └────────────────────┴────────────────────┘
+                             │
+                             v
+              /accessibility?mode=…  ·  /accessibility/compare
+                             │
+                             v
+                  FastAPI GeoJSON + MapLibre UI
 ```
 
 ## The prepare / serve split
@@ -69,6 +79,26 @@ from geometry, and drops edges that still have no usable length (reported as `dr
 Reading the cache deliberately depends only on networkx and shapely, so the running server does not need
 OSMnx (or geopandas, or a network connection) installed at all.
 
+## One question, three modes
+
+`app/modes.py` holds the whole mode vocabulary: the `TravelMode` enum, which prepared network each
+mode routes on, its label and its colour. Everything else reads from there.
+
+```text
+TravelMode.WALK     → network "walk"   → NetworkAccessibilityService @ 4.8 km/h
+TravelMode.BIKE     → network "bike"   → NetworkAccessibilityService @ 15 km/h
+TravelMode.TRANSIT  → network "walk"   → MultimodalAccessibilityService + timetable
+```
+
+Walking and cycling are the *same engine* with a different graph and speed —
+`CyclingAccessibilityService` is nine lines. Transit is a separate service because its cost model is
+genuinely different (time of day matters), but it deliberately returns the same shape: origin,
+budget, mode, reachable services by category, nearest per category, completeness, provenance. That
+is what makes `/accessibility/compare` a table rather than three special cases.
+
+Mode-specific detail lives in mode-specific fields — `network` for the street modes, `transit` and
+`journey` for transit — so a client can read the common part and ignore the rest.
+
 ## Where the service logic lives
 
 - `app/service_model.py` — `ServiceCategory` enum, `ServiceLocation`, labels, colours, the six
@@ -76,6 +106,10 @@ OSMnx (or geopandas, or a network connection) installed at all.
 - `app/service_index.py` — snapping (`snap_services`), the in-memory `ServiceIndex`, the
   reachability query and the completeness indicator.
 - `app/analysis.py` — `CityAnalysis`: the inverted, city-wide gap query.
+- `app/modes.py` — the travel-mode vocabulary.
+- `app/transit_model.py` — the normalized timetable, GTFS time handling, per-service-day views.
+- `app/transit_index.py` — RAPTOR, and how stops attach to the walking network.
+- `app/multimodal.py` — walk → wait → ride → transfer → walk, and itinerary reconstruction.
 - `app/data_quality.py` — the generated report behind `/data/status`.
 
 `WalkingAccessibilityService` gained one constructor argument (`services`) and one method
@@ -106,17 +140,30 @@ snapping is chunked, so attaching a thousand services never allocates a hundred-
 
 | Step | Cost |
 |---|---|
-| `prepare_data` (cold: network + entities + 1,308 services + snapping) | ~35 s |
-| `prepare_data` (warm, all caches valid) | ~4 s |
-| Server startup (three caches, index build, entity attach) | ~1.3 s |
-| 15-minute query incl. services, 2,362 edges | ~30 ms |
-| 15-minute service profile only (`/accessibility/walk/services`) | ~15 ms |
-| Route to one service | ~10 ms |
+| `prepare_data` (cold, everything incl. the 224 MB GTFS download) | ~4 min |
+| `prepare_data` (cold, GTFS archive already downloaded) | ~90 s |
+| `prepare_data` (warm, all caches valid) | ~15 s |
+| Server startup (five caches, index builds, stop + entity attach) | ~1.8 s |
+| Walking, 15 min | ~150 ms |
+| Cycling, 15 min (5,595 edges — a bicycle covers 3.75 km) | ~420 ms |
+| Transit, 15 min | ~210 ms |
+| Transit, 30 min | ~250 ms |
+| Mode comparison, all three | ~220 ms |
+| Route/itinerary to one service | 1–250 ms |
 | City-wide gap query (first call builds the node→neighbourhood index) | ~400 ms / ~80 ms after |
-| 15-minute query with `include_buffer=true` | ~0.9 s (GEOS buffering; opt-in) |
 
 The map draws the reachable corridor as a wide translucent line rather than requesting a buffered polygon,
 which gives the same picture with none of the GEOS cost.
+
+Three things keep the added modes cheap. The first transit query of a given date pays ~0.4 s to
+materialize that service day's trips (which trips run, with after-midnight runs shifted into place);
+every later query on that date reuses it. Edge GeoJSON is converted and rounded once per edge and
+memoized, because the same edges come back on every query. And the large responses bypass FastAPI's
+`jsonable_encoder`, which costs more than the JSON encoding itself on a two-megabyte GeoJSON body.
+
+Each category row carries `ids` — every reachable service — alongside `items`, the detailed rows,
+which are capped at 60 per category. The map highlights from `ids`; the sidebar reads `items`. A
+15-minute cycling query reaches over a thousand services, and the difference is a megabyte.
 
 Service reachability costs almost nothing because it is a lookup, not a search: the index keeps an
 `access node -> services` dictionary, so a query walks the reachable nodes it already has. Snapping

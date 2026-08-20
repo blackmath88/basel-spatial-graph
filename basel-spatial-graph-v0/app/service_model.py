@@ -6,9 +6,9 @@ display label is kept separate from the canonical id.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Dict, Optional
 
 
 class ServiceCategory(str, Enum):
@@ -81,13 +81,41 @@ def parse_category(value) -> ServiceCategory:
         raise UnknownCategoryError(str(exc), known=[c.value for c in ServiceCategory])
 
 
+# The default network a bare `access_*` property refers to.
+DEFAULT_NETWORK = "walk"
+
+
+@dataclass
+class ServiceAccess:
+    """How one service attaches to one street network."""
+
+    node_id: Optional[str] = None
+    distance_m: Optional[float] = None
+    quality: str = "unsnapped"   # good | poor | unreachable | unsnapped
+
+    @property
+    def is_routable(self) -> bool:
+        return self.node_id is not None and self.quality in {"good", "poor"}
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data) -> "ServiceAccess":
+        if data is None:
+            return cls()
+        known = set(cls.__dataclass_fields__)
+        return cls(**{k: v for k, v in dict(data).items() if k in known})
+
+
 @dataclass
 class ServiceLocation:
     """One everyday destination, normalized across all providers.
 
-    `access_node_id` / `access_distance_m` are filled in once, at preparation
-    time, by snapping to the walking network. They are cached, never recomputed
-    per request.
+    `access` holds one `ServiceAccess` per prepared street network (`walk`,
+    `bike`), each filled in once at preparation time and cached — never
+    recomputed per request. A service can be well attached to the cycling
+    network and badly attached to the pedestrian one, or vice versa.
     """
 
     id: str
@@ -105,9 +133,7 @@ class ServiceLocation:
     # Simplified WGS84 outline for area services (parks, sport grounds). Used to
     # snap from the nearest edge of the site rather than from its centre.
     footprint_wkt: Optional[str] = None
-    access_node_id: Optional[str] = None
-    access_distance_m: Optional[float] = None
-    access_quality: str = "unsnapped"   # good | poor | unreachable | unsnapped
+    access: Dict[str, ServiceAccess] = field(default_factory=dict)
 
     # -- geometry -------------------------------------------------------------
     @property
@@ -119,9 +145,32 @@ class ServiceLocation:
         """For UI only. Marked as a fallback, never written back as `name`."""
         return self.name or f"{category_label(self.category).rstrip('s')} (unnamed)"
 
+    # -- network attachment ---------------------------------------------------
+    def access_for(self, network: str = DEFAULT_NETWORK) -> ServiceAccess:
+        return self.access.get(network) or ServiceAccess()
+
+    def set_access(self, network: str, node_id, distance_m, quality: str) -> None:
+        self.access[network] = ServiceAccess(node_id, distance_m, quality)
+
+    def is_routable_on(self, network: str = DEFAULT_NETWORK) -> bool:
+        return self.access_for(network).is_routable
+
+    @property
+    def access_node_id(self) -> Optional[str]:
+        return self.access_for().node_id
+
+    @property
+    def access_distance_m(self) -> Optional[float]:
+        return self.access_for().distance_m
+
+    @property
+    def access_quality(self) -> str:
+        return self.access_for().quality
+
     @property
     def is_routable(self) -> bool:
-        return self.access_node_id is not None and self.access_quality in {"good", "poor"}
+        """Routable on the pedestrian network — the historical meaning."""
+        return self.is_routable_on(DEFAULT_NETWORK)
 
     # -- provenance -----------------------------------------------------------
     @property
@@ -141,6 +190,7 @@ class ServiceLocation:
     def to_dict(self) -> dict:
         data = asdict(self)
         data["category"] = self.category.value
+        data["access"] = {name: access.to_dict() for name, access in self.access.items()}
         return data
 
     @classmethod
@@ -148,8 +198,20 @@ class ServiceLocation:
         payload = dict(data)
         payload["category"] = ServiceCategory.parse(payload["category"])
         payload.pop("geometry", None)
+        access = payload.pop("access", None)
+        # A V0.3 cache stored a single flat walking attachment.
+        legacy = {
+            "node_id": payload.pop("access_node_id", None),
+            "distance_m": payload.pop("access_distance_m", None),
+            "quality": payload.pop("access_quality", "unsnapped"),
+        }
         known = set(cls.__dataclass_fields__)
-        return cls(**{k: v for k, v in payload.items() if k in known})
+        service = cls(**{k: v for k, v in payload.items() if k in known})
+        if isinstance(access, dict):
+            service.access = {name: ServiceAccess.from_dict(value) for name, value in access.items()}
+        elif legacy["node_id"] is not None:
+            service.access = {DEFAULT_NETWORK: ServiceAccess.from_dict(legacy)}
+        return service
 
     def to_feature(self) -> dict:
         return {
@@ -164,8 +226,19 @@ class ServiceLocation:
             },
         }
 
-    def summary(self) -> dict:
-        """The shape returned inside accessibility results and /services/{cat}/{id}."""
+    def summary(self, network: str = DEFAULT_NETWORK) -> dict:
+        """The shape returned inside accessibility results and /services/{cat}/{id}.
+
+        `access` describes the attachment on the network the query used;
+        `access_by_network` shows every prepared attachment.
+        """
+        def describe(item: ServiceAccess) -> dict:
+            return {
+                "node_id": item.node_id,
+                "snap_distance_m": round(item.distance_m, 1) if item.distance_m is not None else None,
+                "quality": item.quality,
+            }
+
         return {
             "id": self.id,
             "category": self.category.value,
@@ -174,10 +247,8 @@ class ServiceLocation:
             "display_name": self.display_name,
             "geometry": self.geometry,
             "attributes": self.attributes,
-            "access": {
-                "node_id": self.access_node_id,
-                "snap_distance_m": round(self.access_distance_m, 1) if self.access_distance_m is not None else None,
-                "quality": self.access_quality,
-            },
+            "access": describe(self.access_for(network)),
+            "access_network": network,
+            "access_by_network": {name: describe(item) for name, item in self.access.items()},
             "provenance": self.provenance,
         }

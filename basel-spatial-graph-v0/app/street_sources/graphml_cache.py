@@ -19,7 +19,7 @@ from .base import StreetNetwork
 # Graph-level attributes round-tripped through GraphML as the provenance record.
 PROVENANCE_KEYS = (
     "mode", "source", "dataset", "source_url", "license", "retrieved_at",
-    "crs", "metric_crs", "place", "network_type", "osmnx_version", "attribution",
+    "crs", "metric_crs", "place", "network_type", "network", "osmnx_version", "attribution",
 )
 
 

@@ -8,6 +8,7 @@ import os
 os.environ["BASEL_GRAPH_FIXTURE"] = "1"
 os.environ["BASEL_STREET_NETWORK_SOURCE"] = "fixture"
 os.environ["BASEL_SERVICE_SOURCE"] = "fixture"
+os.environ["BASEL_TRANSIT_SOURCE"] = "fixture"
 
 import socket  # noqa: E402
 
@@ -18,6 +19,8 @@ from app.graph import build_graph  # noqa: E402
 from app.service_index import ServiceIndex, snap_services  # noqa: E402
 from app.service_sources import fixture_services  # noqa: E402
 from app.street_sources import fixture_street_network  # noqa: E402
+from app.transit_index import TransitIndex  # noqa: E402
+from app.transit_sources import fixture_timetable  # noqa: E402
 
 
 @pytest.fixture
@@ -31,9 +34,23 @@ def entity_graph():
 
 
 @pytest.fixture
-def service_index(streets):
-    """The synthetic services, snapped to the synthetic walking grid."""
-    return ServiceIndex(snap_services(streets, fixture_services()), mode="fixture")
+def bike_network():
+    return fixture_street_network(kind="bike")
+
+
+@pytest.fixture
+def service_index(streets, bike_network):
+    """The synthetic services, snapped to both synthetic grids."""
+    services = fixture_services()
+    snap_services(streets, services, network="walk")
+    snap_services(bike_network, services, network="bike")
+    return ServiceIndex(services, mode="fixture", networks=("walk", "bike"))
+
+
+@pytest.fixture
+def transit_index(streets):
+    """The synthetic timetable, attached to the synthetic walking grid."""
+    return TransitIndex(fixture_timetable(), mode="fixture").attach_to_network(streets)
 
 
 @pytest.fixture(autouse=True)

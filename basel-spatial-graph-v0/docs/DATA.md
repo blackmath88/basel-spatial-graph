@@ -45,6 +45,33 @@ but it would change if a school moved in the source data.
 
 Cached at `data/processed/basel_entities.json`; raw responses are kept in `data/raw/*.json` for inspection.
 
+## Cycling network — LIVE
+
+| | |
+|---|---|
+| Source | OpenStreetMap via OSMnx, `network_type="bike"`, same place query |
+| Size | 5,918 nodes · 8,034 undirected edges · ~584 km of cyclable ways |
+| Cache | `data/processed/basel_cycling_network.graphml` |
+
+A genuinely separate graph: the bicycle filter drops footways, steps and `bicycle=no` ways, so it
+has ~300 km *less* road than the pedestrian network. See [the cycling guide](CYCLING.md).
+
+## Public transport — LIVE
+
+| | |
+|---|---|
+| Source | [opentransportdata.swiss](https://data.opentransportdata.swiss/dataset/timetable-2026-gtfs2020), official Swiss national GTFS |
+| Licence | Open data, attribution required |
+| Archive | 224 MB zip (`stop_times.txt` alone is 2.9 GB uncompressed) |
+| Extraction | lat 47.42–47.68, lon 7.40–7.90 — Basel plus Baselland, Lörrach, Weil am Rhein, Saint-Louis |
+| Size | 1,437 stations · 246 routes · 200,696 trips · 1,997 patterns |
+| Service window | 2025-12-14 – 2026-12-12 |
+| Cache | `data/processed/basel_transit.npz` (6 MB) |
+
+Extracted in one streaming pass, never loaded whole. Platforms are collapsed into their parent
+station. 283 of the 1,437 stations sit inside the pedestrian network and can therefore be boarded
+from or alighted at; the rest can be ridden through. See [the transit guide](TRANSIT.md).
+
 ## Service locations — LIVE
 
 1,308 everyday destinations across eight categories, from official Basel-Stadt datasets where they
@@ -61,8 +88,9 @@ exist and OpenStreetMap where they do not:
 | Pharmacy | OpenStreetMap | 63 |
 | Library | OpenStreetMap | 33 |
 
-Cached at `data/processed/basel_services.json` — including each location's walking-network access
-node, snap distance and snap quality, plus a fingerprint of the network that produced them.
+Cached at `data/processed/basel_services.json` — including each location's access node, snap
+distance and snap quality **for every prepared network** (walking and cycling separately), plus a
+fingerprint per network so a re-prepared graph invalidates only its own snapping.
 See [the services guide](SERVICES.md) for the tag mappings, snapping rules and completeness limits.
 
 ## The data-quality report
@@ -79,8 +107,11 @@ Info dataset) and 34 school pairs at the same address.
 `app/fixtures.py` holds synthetic entities. `street_sources/fixture_source.py` holds a synthetic 7×5 grid
 with a deliberate barrier crossed on only two rows — it makes "nearby but not reachable" testable.
 `service_sources/fixture_source.py` holds twelve synthetic services placed against that grid, covering
-every essential category (and one deliberately unnamed park). All three exist for deterministic tests
-and offline demos only.
+every essential category (and one deliberately unnamed park). The bicycle fixture grid covers the same
+positions but crosses the barrier and uses its own node ids, so nothing can silently route cycling over
+the pedestrian graph. `transit_sources/fixture_source.py` holds a four-stop timetable with weekday,
+weekend and after-midnight services and one calendar exception. All of them exist for deterministic
+tests and offline demos only.
 
 Fallback is always explicit and always reported:
 
@@ -93,8 +124,9 @@ Every accessibility response carries `provenance.mode` and `provenance.network.f
 turn orange. Nothing synthetic is ever labelled live.
 
 To force fixture mode: `BASEL_GRAPH_FIXTURE=1` (everything), `BASEL_STREET_NETWORK_SOURCE=fixture`
-(streets only) or `BASEL_SERVICE_SOURCE=fixture` (services only). To make the app *refuse* to run on
-fixture streets, set `BASEL_STREET_NETWORK_SOURCE=osmnx`.
+(streets only), `BASEL_SERVICE_SOURCE=fixture` (services only) or `BASEL_TRANSIT_SOURCE=fixture`
+(timetable only). To make the app *refuse* to run on fixture data, set
+`BASEL_STREET_NETWORK_SOURCE=osmnx` or `BASEL_TRANSIT_SOURCE=gtfs`.
 
 ## Derived data
 

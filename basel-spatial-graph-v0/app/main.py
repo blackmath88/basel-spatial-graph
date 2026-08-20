@@ -6,16 +6,20 @@ from fastapi.staticfiles import StaticFiles
 
 from typing import List, Optional
 
-from .accessibility import WalkingAccessibilityService
+from .accessibility import CyclingAccessibilityService, WalkingAccessibilityService
 from .analysis import CityAnalysis
 from .config import (
     BASEL_CENTER,
+    DEFAULT_CYCLING_SPEED_KMH,
+    DEFAULT_SPEEDS_KMH,
     DEFAULT_WALKING_SPEED_KMH,
     MAX_SNAP_DISTANCE_M,
     STATIC_DIR,
 )
 from .data_quality import build_report, concise, read_report
-from .errors import BaselGraphError, UnknownServiceError
+from .errors import BaselGraphError, TransitUnavailableError, UnknownServiceError
+from .transit_model import route_type_label
+from .modes import MODE_COLORS, MODE_ORDER, TravelMode, mode_label, parse_mode
 from .graph import build_graph, centroid_coords, connect_street_access, neighbors, node_payload, subgraph
 from .ingest import load_data
 from .service_index import index_from_payload
@@ -26,20 +30,58 @@ from .service_model import (
     category_label,
     parse_category,
 )
+from .multimodal import DEFAULT_MAX_TRANSFERS, MAX_TRANSFERS_LIMIT, MultimodalAccessibilityService
 from .service_sources import load_services
-from .street_sources import load_street_network
+from .street_sources import load_network
+from .transit_sources import load_transit
 
 FIXTURE_MODE = os.getenv("BASEL_GRAPH_FIXTURE", "0") == "1"
+# Detailed rows returned per category. Every reachable service id is always
+# listed under `ids`; this only caps the verbose rows the sidebar shows.
+SERVICE_ITEM_LIMIT = 60
 
 # Loaded once at import time from prepared caches: no downloads, no rebuilds.
 DATA = load_data(force_fixture=FIXTURE_MODE)
 GRAPH = build_graph(DATA)
-STREETS = load_street_network(force_fixture=FIXTURE_MODE)
-SERVICES = index_from_payload(load_services(force_fixture=FIXTURE_MODE), STREETS)
+NETWORKS = {
+    "walk": load_network("walk", force_fixture=FIXTURE_MODE),
+    "bike": load_network("bike", force_fixture=FIXTURE_MODE),
+}
+STREETS = NETWORKS["walk"]          # the V0.2/V0.3 name
+BIKE_NETWORK = NETWORKS["bike"]
+SERVICES = index_from_payload(load_services(force_fixture=FIXTURE_MODE), NETWORKS)
+
 ACCESSIBILITY = WalkingAccessibilityService(STREETS, GRAPH, SERVICES)
+CYCLING = CyclingAccessibilityService(BIKE_NETWORK, GRAPH, SERVICES)
+SERVICES_BY_MODE = {TravelMode.WALK: ACCESSIBILITY, TravelMode.BIKE: CYCLING}
+
+TRANSIT = load_transit(force_fixture=FIXTURE_MODE).attach_to_network(STREETS)
+MULTIMODAL = MultimodalAccessibilityService(STREETS, TRANSIT, GRAPH, SERVICES)
+if MULTIMODAL.available:
+    SERVICES_BY_MODE[TravelMode.TRANSIT] = MULTIMODAL
+
 ANALYSIS = CityAnalysis(STREETS, SERVICES, GRAPH)
 connect_street_access(GRAPH, STREETS)
-QUALITY = read_report() or build_report(STREETS, DATA, SERVICES)
+QUALITY = read_report() or build_report(NETWORKS, DATA, SERVICES, TRANSIT)
+
+
+def payload(result: dict) -> JSONResponse:
+    """Serialize a large result directly.
+
+    FastAPI's default path runs `jsonable_encoder` over the whole structure
+    first, which costs more than the JSON encoding itself on a two-megabyte
+    GeoJSON response. These payloads are already plain JSON types.
+    """
+    return JSONResponse(content=result)
+
+
+def service_for(mode: TravelMode):
+    """The accessibility service that answers for one travel mode."""
+    engine = SERVICES_BY_MODE.get(mode)
+    if engine is None:
+        raise TransitUnavailableError(
+            "Transit routing is not available in this build.", mode=mode.value)
+    return engine
 
 
 def parse_categories(value: Optional[str]) -> Optional[List[ServiceCategory]]:
@@ -67,6 +109,7 @@ def root():
 @app.get("/health")
 def health():
     stats = STREETS.stats()
+    bike_stats = BIKE_NETWORK.stats()
     return {
         "ok": True,
         "entities": {
@@ -90,6 +133,17 @@ def health():
             "retrieved_at": STREETS.provenance.get("retrieved_at"),
             "cache_path": STREETS.provenance.get("cache_path"),
         },
+        "bike": {
+            "mode": bike_stats["mode"],
+            "source": bike_stats["source"],
+            "fallback_reason": BIKE_NETWORK.fallback_reason,
+            "nodes": bike_stats["nodes"],
+            "edges": bike_stats["edges"],
+            "total_length_m": bike_stats["total_length_m"],
+            "place": BIKE_NETWORK.provenance.get("place"),
+            "retrieved_at": BIKE_NETWORK.provenance.get("retrieved_at"),
+            "cache_path": BIKE_NETWORK.provenance.get("cache_path"),
+        },
         "services": {
             "mode": SERVICES.mode,
             "fallback_reason": SERVICES.fallback_reason,
@@ -98,6 +152,20 @@ def health():
             "generated_at": SERVICES.generated_at,
             "resnapped_at_startup": SERVICES.resnapped,
             "categories": {c.value: len(SERVICES.by_category.get(c, [])) for c in SERVICES.categories},
+        },
+        "transit": {
+            "mode": TRANSIT.mode,
+            "available": MULTIMODAL.available,
+            "fallback_reason": TRANSIT.fallback_reason,
+            "source": TRANSIT.provenance.get("source"),
+            "feed": TRANSIT.provenance.get("feed"),
+            "feed_version": TRANSIT.provenance.get("feed_version"),
+            "stops": TRANSIT.timetable.stop_count if TRANSIT.timetable else 0,
+            "routes": TRANSIT.timetable.route_count if TRANSIT.timetable else 0,
+            "trips": TRANSIT.timetable.trip_count if TRANSIT.timetable else 0,
+            "stops_attached": sum(1 for a in TRANSIT.stop_access if a.is_routable),
+            "default_max_transfers": DEFAULT_MAX_TRANSFERS,
+            "timezone": "Europe/Zurich",
         },
         "data_quality": {
             "available": bool(QUALITY),
@@ -109,8 +177,19 @@ def health():
             "center": list(BASEL_CENTER),
             "zoom": 13.4,
             "default_walking_speed_kmh": DEFAULT_WALKING_SPEED_KMH,
+            "default_cycling_speed_kmh": DEFAULT_CYCLING_SPEED_KMH,
             "max_snap_distance_m": MAX_SNAP_DISTANCE_M,
         },
+        "modes": [
+            {
+                "mode": m.value,
+                "label": mode_label(m),
+                "color": MODE_COLORS[m],
+                "available": m in SERVICES_BY_MODE,
+                "default_speed_kmh": DEFAULT_SPEEDS_KMH.get(m.value),
+            }
+            for m in MODE_ORDER
+        ],
         "categories": [
             {
                 "category": c.value,
@@ -175,13 +254,13 @@ def walking_accessibility(
     include_services: bool = Query(True, description="include the reachable-service profile"),
 ):
     """Everything reachable on foot from one origin: network, services, completeness."""
-    return ACCESSIBILITY.calculate(
+    return payload(ACCESSIBILITY.calculate(
         lat, lon, minutes, walking_speed_kmh,
         include_straight_line=include_straight_line,
         include_buffer=include_buffer,
         categories=parse_categories(categories),
         include_services=include_services,
-    )
+    ))
 
 
 @app.get("/accessibility/walk/services", tags=["accessibility"])
@@ -215,6 +294,233 @@ def walking_route(
 ):
     """The shortest walking path from an origin to one service, as GeoJSON."""
     return ACCESSIBILITY.route_to_service(lat, lon, service_id, walking_speed_kmh)
+
+
+@app.get("/accessibility", tags=["accessibility"])
+def accessibility(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    mode: str = Query("walk", description="walk | bike | transit"),
+    minutes: float = Query(15, gt=0, le=60),
+    speed_kmh: Optional[float] = Query(None, description="overrides the mode default"),
+    departure_time: Optional[str] = Query(None, description="transit only: HH:MM or ISO datetime"),
+    max_transfers: int = Query(DEFAULT_MAX_TRANSFERS, ge=0, le=MAX_TRANSFERS_LIMIT),
+    categories: Optional[str] = Query(None),
+    include_services: bool = Query(True),
+    include_straight_line: bool = Query(True),
+    service_limit: int = Query(SERVICE_ITEM_LIMIT, ge=1, le=2000,
+                               description="detailed rows per category; every reachable id is always listed"),
+):
+    """One origin, one time budget, one travel mode — everything reachable."""
+    travel_mode = parse_mode(mode)
+    engine = service_for(travel_mode)
+    wanted = parse_categories(categories)
+    if travel_mode is TravelMode.TRANSIT:
+        return payload(engine.calculate(
+            lat, lon, minutes, departure_time=departure_time,
+            max_transfers=max_transfers, walking_speed_kmh=speed_kmh,
+            categories=wanted, include_services=include_services,
+            service_limit=service_limit))
+    return payload(engine.calculate(
+        lat, lon, minutes, speed_kmh, categories=wanted,
+        include_services=include_services,
+        include_straight_line=include_straight_line,
+        service_limit=service_limit))
+
+
+@app.get("/accessibility/bike", tags=["accessibility"])
+def cycling_accessibility(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    minutes: float = Query(15, gt=0, le=60),
+    cycling_speed_kmh: float = Query(DEFAULT_CYCLING_SPEED_KMH, gt=0, le=45),
+    include_straight_line: bool = Query(True),
+    include_buffer: bool = Query(False),
+    categories: Optional[str] = Query(None),
+    include_services: bool = Query(True),
+    service_limit: int = Query(SERVICE_ITEM_LIMIT, ge=1, le=2000),
+):
+    """Reachability over the bicycle-accessible network at a flat speed."""
+    return payload(CYCLING.calculate(
+        lat, lon, minutes, cycling_speed_kmh,
+        include_straight_line=include_straight_line, include_buffer=include_buffer,
+        categories=parse_categories(categories), include_services=include_services,
+        service_limit=service_limit,
+    ))
+
+
+@app.get("/accessibility/bike/route", tags=["accessibility"])
+def cycling_route(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    service_id: str = Query(...),
+    cycling_speed_kmh: float = Query(DEFAULT_CYCLING_SPEED_KMH, gt=0, le=45),
+):
+    """The shortest bicycle path from an origin to one service."""
+    return CYCLING.route_to_service(lat, lon, service_id, cycling_speed_kmh)
+
+
+@app.get("/accessibility/transit", tags=["accessibility"])
+def transit_accessibility(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    minutes: float = Query(15, gt=0, le=60),
+    departure_time: Optional[str] = Query(None, description="HH:MM or ISO datetime, Europe/Zurich"),
+    max_transfers: int = Query(DEFAULT_MAX_TRANSFERS, ge=0, le=MAX_TRANSFERS_LIMIT),
+    walking_speed_kmh: float = Query(DEFAULT_WALKING_SPEED_KMH, gt=0, le=12),
+    categories: Optional[str] = Query(None),
+    include_services: bool = Query(True),
+    service_limit: int = Query(SERVICE_ITEM_LIMIT, ge=1, le=2000),
+):
+    """Walk → wait → ride → (transfer) → walk, against the real timetable."""
+    return payload(MULTIMODAL.calculate(
+        lat, lon, minutes, departure_time=departure_time, max_transfers=max_transfers,
+        walking_speed_kmh=walking_speed_kmh, categories=parse_categories(categories),
+        include_services=include_services, service_limit=service_limit,
+    ))
+
+
+@app.get("/accessibility/transit/route", tags=["accessibility"])
+def transit_route(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    service_id: str = Query(...),
+    minutes: float = Query(60, gt=0, le=120),
+    departure_time: Optional[str] = Query(None),
+    max_transfers: int = Query(DEFAULT_MAX_TRANSFERS, ge=0, le=MAX_TRANSFERS_LIMIT),
+    walking_speed_kmh: float = Query(DEFAULT_WALKING_SPEED_KMH, gt=0, le=12),
+):
+    """One readable itinerary to one service, with its geometry."""
+    return MULTIMODAL.route_to_service(lat, lon, service_id, minutes=minutes,
+                                       departure_time=departure_time,
+                                       max_transfers=max_transfers,
+                                       walking_speed_kmh=walking_speed_kmh)
+
+
+@app.get("/accessibility/compare", tags=["accessibility"])
+def compare_modes(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    minutes: float = Query(15, gt=0, le=60),
+    departure_time: Optional[str] = Query(None),
+    max_transfers: int = Query(DEFAULT_MAX_TRANSFERS, ge=0, le=MAX_TRANSFERS_LIMIT),
+    modes: Optional[str] = Query(None, description="comma-separated; default all available"),
+):
+    """The same question answered by every mode, side by side.
+
+    Geometry is omitted: this is the comparison table, not the map.
+    """
+    wanted = [parse_mode(m.strip()) for m in modes.split(",")] if modes else list(MODE_ORDER)
+    rows, errors = {}, {}
+    for travel_mode in wanted:
+        engine = SERVICES_BY_MODE.get(travel_mode)
+        if engine is None:
+            errors[travel_mode.value] = "not available in this build"
+            continue
+        try:
+            if travel_mode is TravelMode.TRANSIT:
+                result = engine.calculate(lat, lon, minutes, departure_time=departure_time,
+                                          max_transfers=max_transfers,
+                                          include_service_items=False, include_geometry=False)
+            else:
+                result = engine.calculate(lat, lon, minutes, include_service_items=False,
+                                          include_geometry=False, include_straight_line=False)
+        except BaselGraphError as exc:
+            errors[travel_mode.value] = exc.message
+            continue
+        rows[travel_mode.value] = {
+            "mode": travel_mode.value,
+            "label": mode_label(travel_mode),
+            "color": MODE_COLORS[travel_mode],
+            "speed_kmh": result.get("speed_kmh"),
+            "reachable_services": {
+                name: {"count": row["count"], "nearest_minutes": row["nearest_minutes"],
+                       "nearest_name": row["nearest_name"], "label": row["label"],
+                       "essential": row["essential"]}
+                for name, row in result["reachable_services"].items()
+            },
+            "completeness": result["completeness"],
+            "network": result["network"],
+            "transit": result.get("transit"),
+            "departure_time": result.get("departure_time"),
+            "service_date": result.get("service_date"),
+            "notes": result.get("notes", []),
+        }
+    categories = sorted({name for row in rows.values() for name in row["reachable_services"]})
+    return {
+        "origin": {"lat": round(float(lat), 6), "lon": round(float(lon), 6)},
+        "minutes": minutes,
+        "modes": rows,
+        "unavailable": errors,
+        "categories": categories,
+        # A ready-made table: category -> mode -> count.
+        "table": {
+            name: {mode: rows[mode]["reachable_services"].get(name, {}).get("count", 0)
+                   for mode in rows}
+            for name in categories
+        },
+    }
+
+
+# --- transit reference data --------------------------------------------------
+@app.get("/transit/status", tags=["transit"])
+def transit_status():
+    """Is a timetable prepared, where did it come from, and what does it cover?"""
+    report = TRANSIT.quality_report()
+    report["available"] = MULTIMODAL.available
+    report["provenance"] = TRANSIT.provenance
+    return report
+
+
+@app.get("/transit/stops", tags=["transit"])
+def transit_stops(
+    limit: int = Query(500, ge=1, le=5000),
+    attached_only: bool = Query(True, description="only stops the walking network can reach"),
+    q: Optional[str] = Query(None, description="filter by name"),
+):
+    """Prepared stops as GeoJSON."""
+    if not MULTIMODAL.available:
+        raise TransitUnavailableError("No timetable is prepared.")
+    table = TRANSIT.timetable
+    needle = (q or "").strip().lower()
+    features = []
+    for index in range(table.stop_count):
+        access = TRANSIT.stop_access[index]
+        if attached_only and not access.is_routable:
+            continue
+        name = table.stop_names[index]
+        if needle and needle not in name.lower():
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [
+                round(float(table.stop_lon[index]), 6), round(float(table.stop_lat[index]), 6)]},
+            "properties": {"id": table.stop_ids[index], "name": name,
+                           "access": access.to_dict()},
+        })
+        if len(features) >= limit:
+            break
+    return {"type": "FeatureCollection", "features": features,
+            "total": table.stop_count, "returned": len(features)}
+
+
+@app.get("/transit/routes", tags=["transit"])
+def transit_routes():
+    """Prepared routes, grouped by vehicle type."""
+    if not MULTIMODAL.available:
+        raise TransitUnavailableError("No timetable is prepared.")
+    table = TRANSIT.timetable
+    rows = [
+        {"id": r.id, "short_name": r.short_name, "long_name": r.long_name,
+         "route_type": r.route_type, "vehicle": route_type_label(r.route_type),
+         "label": r.label, "agency": r.agency_name}
+        for r in table.routes
+    ]
+    rows.sort(key=lambda r: (r["vehicle"], r["short_name"]))
+    counts = {}
+    for row in rows:
+        counts[row["vehicle"]] = counts.get(row["vehicle"], 0) + 1
+    return {"total": len(rows), "by_vehicle": counts, "routes": rows}
 
 
 @app.get("/entities/{entity_type}/{entity_id:path}/accessibility")

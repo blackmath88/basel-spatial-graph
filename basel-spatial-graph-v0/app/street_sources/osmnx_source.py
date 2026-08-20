@@ -1,13 +1,15 @@
-"""OpenStreetMap walking network via OSMnx.
+"""OpenStreetMap street networks via OSMnx.
 
-Downloading only ever happens in `python -m app.prepare_data`. At runtime the
-source reads the prepared GraphML cache, so starting the API never touches the
-network and never rebuilds the graph.
+One source class serves every prepared network — pedestrian (`walk`) and
+bicycle (`bike`) — differing only in the OSMnx `network_type` filter and the
+cache it writes. Downloading only ever happens in `python -m app.prepare_data`;
+at runtime the source reads the prepared GraphML cache, so starting the API
+never touches the network and never rebuilds a graph.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 import networkx as nx
 from shapely import wkt
@@ -17,8 +19,9 @@ from shapely.errors import ShapelyError
 from ..config import (
     BASEL_BBOX,
     BASEL_PLACE_QUERIES,
+    NETWORK_CACHES,
+    NETWORK_TYPES,
     OSMNX_CACHE_DIR,
-    OSMNX_NETWORK_TYPE,
     WALK_NETWORK_CACHE,
 )
 from ..errors import NetworkSourceError
@@ -42,18 +45,24 @@ def _as_float(value, default=None):
         return default
 
 
-class OSMnxWalkingNetworkSource(WalkingNetworkSource):
+class OSMnxNetworkSource(WalkingNetworkSource):
+    """Prepares one OSM street network (`walk` or `bike`) for a place."""
+
     name = "OpenStreetMap / OSMnx"
 
     def __init__(
         self,
-        cache_path: Path = WALK_NETWORK_CACHE,
+        cache_path: Optional[Path] = None,
         place_queries: Sequence[str] = BASEL_PLACE_QUERIES,
         bbox=BASEL_BBOX,
-        network_type: str = OSMNX_NETWORK_TYPE,
+        network_type: Optional[str] = None,
         allow_download: bool = False,
         refresh: bool = False,
+        kind: str = "walk",
     ):
+        self.kind = kind
+        network_type = network_type or NETWORK_TYPES.get(kind, kind)
+        cache_path = cache_path or NETWORK_CACHES.get(kind, WALK_NETWORK_CACHE)
         self.cache_path = Path(cache_path)
         self.place_queries = tuple(place_queries)
         self.bbox = bbox
@@ -125,8 +134,11 @@ class OSMnxWalkingNetworkSource(WalkingNetworkSource):
     def _convert(self, source_graph, place: str, ox_version: str) -> StreetNetwork:
         """MultiDiGraph from OSMnx -> undirected, metre-weighted StreetNetwork.
 
-        The pedestrian network is walkable in both directions, so parallel and
-        reversed OSM edges collapse to the shortest connection per node pair.
+        Both prepared networks are treated as undirected: pedestrians may use a
+        way in both directions, and for a prototype cycling model one-way
+        streets are not worth the accuracy they would cost elsewhere (see
+        docs/CYCLING.md). Parallel and reversed OSM edges therefore collapse to
+        the shortest connection per node pair.
         """
         graph = nx.Graph()
         for node, data in source_graph.nodes(data=True):
@@ -172,6 +184,7 @@ class OSMnxWalkingNetworkSource(WalkingNetworkSource):
             mode=LIVE,
             source=self.name,
             dataset=f"OSM {self.network_type} network",
+            network=self.kind,
             source_url="https://www.openstreetmap.org/copyright",
             license="ODbL 1.0",
             retrieved_at=utc_now_iso(),
@@ -181,3 +194,24 @@ class OSMnxWalkingNetworkSource(WalkingNetworkSource):
             attribution=OSM_ATTRIBUTION,
         )
         return StreetNetwork(graph, provenance)
+
+
+class OSMnxWalkingNetworkSource(OSMnxNetworkSource):
+    """The pedestrian network. Kept as its own name for the V0.2 call sites."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("kind", "walk")
+        super().__init__(*args, **kwargs)
+
+
+class OSMnxCyclingNetworkSource(OSMnxNetworkSource):
+    """The bicycle-accessible network: OSMnx `network_type="bike"`.
+
+    That filter keeps cycleways, paths and streets bicycles may use, and drops
+    motorways, footway-only links and anything tagged `bicycle=no` — so it is
+    genuinely a different graph from the pedestrian one, not a relabelling.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("kind", "bike")
+        super().__init__(*args, **kwargs)

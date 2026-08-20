@@ -1,9 +1,10 @@
-"""The walking-network model and the contract every street source implements.
+"""The street-network model and the contract every street source implements.
 
 Nothing downstream of this module (accessibility, graph, API, UI) knows whether
-a network came from OpenStreetMap or from the synthetic fixture. It only sees a
-`StreetNetwork`: an undirected graph whose nodes carry `lon/lat` plus projected
-metric `x/y`, and whose edges carry `length_m` and a WGS84 `geom` LineString.
+a network came from OpenStreetMap or from the synthetic fixture, nor whether it
+is the pedestrian or the bicycle graph. It only sees a `StreetNetwork`: an
+undirected graph whose nodes carry `lon/lat` plus projected metric `x/y`, and
+whose edges carry `length_m` and a WGS84 `geom` LineString.
 """
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ def make_provenance(
 
 
 class StreetNetwork:
-    """An undirected, metre-weighted pedestrian network with a spatial index."""
+    """An undirected, metre-weighted street network with a spatial index."""
 
     def __init__(self, graph: nx.Graph, provenance: dict, fallback_reason: Optional[str] = None):
         self.graph = graph
@@ -129,6 +130,11 @@ class StreetNetwork:
     def source_name(self) -> str:
         return self.provenance.get("source", "unknown")
 
+    @property
+    def kind(self) -> str:
+        """Which prepared network this is: `walk` or `bike`."""
+        return self.provenance.get("network", "walk")
+
     def total_length_m(self) -> float:
         return float(sum(d["length_m"] for _, _, d in self.graph.edges(data=True)))
 
@@ -139,6 +145,7 @@ class StreetNetwork:
             "total_length_m": round(self.total_length_m(), 1),
             "mode": self.mode,
             "source": self.source_name,
+            "network": self.kind,
             "crs": self.provenance.get("crs"),
             "metric_crs": self.provenance.get("metric_crs"),
             "dropped_edges": self.dropped_edges,
@@ -146,12 +153,12 @@ class StreetNetwork:
 
     # -- queries --------------------------------------------------------------
     def nearest_node(self, lat: float, lon: float, max_distance_m: Optional[float] = MAX_SNAP_DISTANCE_M):
-        """Snap a WGS84 click to the nearest walkable node.
+        """Snap a WGS84 click to the nearest usable node of this network.
 
         Returns (node_id, distance_m). Distance is measured in METRIC_CRS metres.
         """
         if not self._node_ids:
-            raise EmptyNetworkError("The walking network contains no nodes.")
+            raise EmptyNetworkError(f"The {self.kind} network contains no nodes.")
         try:
             lon_f, lat_f = validate_lonlat(lon, lat)
         except ValueError as exc:
@@ -161,8 +168,9 @@ class StreetNetwork:
         index = int(np.argmin(distances))
         distance = float(distances[index])
         if max_distance_m is not None and distance > max_distance_m:
+            reachable_by = "walkable" if self.kind == "walk" else "cyclable"
             raise OutsideNetworkError(
-                f"No walkable street within {max_distance_m:.0f} m of this location "
+                f"No {reachable_by} street within {max_distance_m:.0f} m of this location "
                 f"(nearest node is {distance:.0f} m away). Click inside the covered area.",
                 snap_distance_m=round(distance, 1),
                 max_snap_distance_m=max_distance_m,
@@ -196,9 +204,19 @@ class StreetNetwork:
         return results
 
     def edge_feature(self, u, v, data: dict) -> dict:
+        """GeoJSON for one edge, with its rounded geometry memoized.
+
+        A city-wide query touches thousands of edges and the same edges come
+        back on every query, so converting and rounding each one once is worth
+        the dictionary slot.
+        """
+        geometry = data.get("geojson")
+        if geometry is None:
+            geometry = _round_coordinates(mapping(data["geom"]))
+            data["geojson"] = geometry
         return {
             "type": "Feature",
-            "geometry": mapping(data["geom"]),
+            "geometry": geometry,
             "properties": {
                 "source": u,
                 "target": v,
@@ -207,6 +225,18 @@ class StreetNetwork:
                 "name": data.get("name"),
             },
         }
+
+
+def _round_coordinates(geometry: dict, precision: int = 6) -> dict:
+    """Trim GeoJSON coordinate noise; halves the payload, changes nothing visible."""
+    def walk(value):
+        if isinstance(value, (list, tuple)):
+            if value and isinstance(value[0], (int, float)):
+                return [round(float(c), precision) for c in value]
+            return [walk(item) for item in value]
+        return value
+
+    return {**geometry, "coordinates": walk(geometry["coordinates"])}
 
 
 class WalkingNetworkSource(ABC):

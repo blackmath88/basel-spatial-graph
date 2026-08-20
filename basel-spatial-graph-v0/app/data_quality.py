@@ -20,16 +20,20 @@ from .service_sources import duplicate_candidates
 MAX_DUPLICATE_SAMPLES = 10
 
 
-def build_report(streets=None, entities: Optional[dict] = None, service_index=None) -> dict:
+def build_report(networks=None, entities: Optional[dict] = None, service_index=None,
+                 transit=None) -> dict:
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "warnings": [],
     }
     warnings = report["warnings"]
 
-    if streets is not None:
+    if networks is not None and not isinstance(networks, dict):
+        networks = {"walk": networks}   # a single StreetNetwork, the V0.3 call
+    for name, streets in (networks or {}).items():
         stats = streets.stats()
-        report["network"] = {
+        block = {
+            "network": name,
             "mode": stats["mode"],
             "source": stats["source"],
             "nodes": stats["nodes"],
@@ -41,10 +45,14 @@ def build_report(streets=None, entities: Optional[dict] = None, service_index=No
             "retrieved_at": streets.provenance.get("retrieved_at"),
             "fallback_reason": streets.fallback_reason,
         }
+        report.setdefault("networks", {})[name] = block
+        if name == "walk":
+            report["network"] = block   # the V0.3 key
         if stats["mode"] != "live":
-            warnings.append("Walking network is FIXTURE data, not real Basel geography.")
+            warnings.append(f"{name.title()} network is FIXTURE data, not real Basel geography.")
         if stats["dropped_edges"]:
-            warnings.append(f"{stats['dropped_edges']} network edges had no usable length and were dropped.")
+            warnings.append(
+                f"{stats['dropped_edges']} {name} network edges had no usable length and were dropped.")
 
     if entities is not None:
         report["entities"] = {
@@ -59,11 +67,35 @@ def build_report(streets=None, entities: Optional[dict] = None, service_index=No
     if service_index is not None:
         report["services"] = _service_report(service_index, warnings)
 
+    if transit is not None:
+        report["transit"] = _transit_report(transit, warnings)
+
     return report
+
+
+def _transit_report(transit, warnings) -> dict:
+    block = transit.quality_report()
+    if block.get("mode") != "live":
+        warnings.append("Transit timetable is FIXTURE data.")
+    if block.get("stop_snap_failures"):
+        warnings.append(
+            f"{block['stop_snap_failures']} transit stop(s) could not be attached to the walking network.")
+    if block.get("poor_stop_snaps"):
+        warnings.append(
+            f"{block['poor_stop_snaps']} transit stop(s) snap further than "
+            f"{POOR_SERVICE_SNAP_M:.0f} m to the nearest street.")
+    if block.get("malformed_records"):
+        warnings.append(f"{block['malformed_records']} malformed GTFS record(s) were skipped.")
+    if not block.get("serves_today"):
+        warnings.append(
+            "The prepared timetable does not cover today's date; transit answers will use "
+            "a date inside its calendar.")
+    return block
 
 
 def _service_report(index, warnings) -> dict:
     categories = {}
+    networks = tuple(getattr(index, "networks", ("walk",)))
     for category in index.categories:
         items = index.by_category[category]
         distances = np.array(
@@ -90,7 +122,19 @@ def _service_report(index, warnings) -> dict:
             },
             "duplicate_candidates": len(duplicates),
             "duplicate_samples": duplicates[:MAX_DUPLICATE_SAMPLES],
+            "by_network": {
+                name: _snap_stats([s.access_for(name) for s in items]) for name in networks
+            },
         }
+        for name in networks:
+            if name == "walk":
+                continue
+            failures = sum(1 for s in items if not s.is_routable_on(name))
+            if failures:
+                warnings.append(
+                    f"{failures} '{category.value}' location(s) could not be attached to the "
+                    f"{name} network."
+                )
         if failed:
             warnings.append(
                 f"{failed} '{category.value}' location(s) could not be attached to the walking network."
@@ -118,7 +162,22 @@ def _service_report(index, warnings) -> dict:
         "generated_at": index.generated_at,
         "fallback_reason": index.fallback_reason,
         "total": len(index.services),
+        "networks": list(networks),
+        "routable_by_network": {
+            name: sum(1 for s in index.services if s.is_routable_on(name)) for name in networks
+        },
         "categories": categories,
+    }
+
+
+def _snap_stats(accesses) -> dict:
+    distances = np.array([a.distance_m for a in accesses if a.distance_m is not None], dtype=float)
+    return {
+        "routable": sum(1 for a in accesses if a.is_routable),
+        "poor_snaps": sum(1 for a in accesses if a.quality == "poor"),
+        "failed_snaps": sum(1 for a in accesses if a.quality in {"unreachable", "unsnapped"}),
+        "median_snap_m": round(float(np.median(distances)), 1) if distances.size else None,
+        "max_snap_m": round(float(distances.max()), 1) if distances.size else None,
     }
 
 
@@ -149,6 +208,11 @@ def concise(report: Optional[dict]) -> dict:
         "available": True,
         "generated_at": report.get("generated_at"),
         "network": {k: report.get("network", {}).get(k) for k in ("mode", "source", "nodes", "edges")},
+        "networks": {
+            name: {k: block.get(k) for k in ("mode", "source", "nodes", "edges", "total_length_km")}
+            for name, block in (report.get("networks") or {}).items()
+        },
+        "transit": report.get("transit"),
         "entities": {k: report.get("entities", {}).get(k) for k in ("mode", "source", "counts")},
         "services": {
             "mode": services.get("mode"),
