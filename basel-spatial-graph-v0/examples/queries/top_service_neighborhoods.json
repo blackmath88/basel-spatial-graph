@@ -1,0 +1,11 @@
+{
+  "start": {"type": "ServiceLocation"},
+  "traverse": [
+    {"relation": "LOCATED_IN", "target_type": "Neighborhood", "as": "neighborhoods", "min_count": 1}
+  ],
+  "group_by": ["neighborhoods.name"],
+  "aggregate": [{"function": "count", "field": "id", "as": "service_count"}],
+  "order_by": [{"field": "service_count", "direction": "desc"}],
+  "limit": 10,
+  "return": ["neighborhoods.name", "service_count"]
+}

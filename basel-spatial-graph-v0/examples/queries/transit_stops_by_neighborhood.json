@@ -1,0 +1,10 @@
+{
+  "start": {"type": "TransitStop"},
+  "traverse": [
+    {"relation": "LOCATED_IN", "target_type": "Neighborhood", "as": "neighborhoods", "min_count": 1}
+  ],
+  "group_by": ["neighborhoods.name"],
+  "aggregate": [{"function": "count", "field": "id", "as": "transit_stop_count"}],
+  "order_by": [{"field": "transit_stop_count", "direction": "desc"}],
+  "return": ["neighborhoods.name", "transit_stop_count"]
+}

@@ -17,6 +17,7 @@ should grow next — not a reason to hand a database a string.
 """
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -29,6 +30,8 @@ from .schema import FILTER_OPS, NODE_TYPES, RELATION_TYPES, node_type, relation_
 DEFAULT_LIMIT = 50
 MAX_TRAVERSE_STEPS = 4
 MAX_ANALYSES = 4
+AGGREGATE_FUNCTIONS = {"count", "count_distinct", "sum", "avg", "min", "max"}
+NUMERIC_FIELD_TYPES = {"integer", "number"}
 
 
 # --- filters ------------------------------------------------------------------
@@ -125,6 +128,29 @@ class AnalysisStep:
                 "constraint": self.constraint}
 
 
+@dataclass(frozen=True)
+class GroupAggregate:
+    function: str
+    field: Optional[str]
+    alias: str
+
+    def describe(self) -> dict:
+        return {"function": self.function, "field": self.field, "alias": self.alias}
+
+
+@dataclass(frozen=True)
+class ResultFilter:
+    field: str
+    op: str
+    value: Any = None
+
+    def matches(self, row: dict) -> bool:
+        return _compare(row.get(self.field), self.op, self.value)
+
+    def describe(self) -> dict:
+        return {"field": self.field, "op": self.op, "value": self.value}
+
+
 @dataclass
 class QuerySpec:
     start_type: str
@@ -133,6 +159,10 @@ class QuerySpec:
     traverse: List[TraverseStep] = field(default_factory=list)
     analyses: List[AnalysisStep] = field(default_factory=list)
     aggregate: Dict[str, dict] = field(default_factory=dict)
+    group_by: List[str] = field(default_factory=list)
+    group_aggregates: List[GroupAggregate] = field(default_factory=list)
+    having: List[ResultFilter] = field(default_factory=list)
+    order_by: List[dict] = field(default_factory=list)
     rank: Optional[dict] = None
     return_fields: Optional[List[str]] = None
     limit: int = DEFAULT_LIMIT
@@ -173,7 +203,23 @@ class QuerySpec:
         for entry in analyses:
             spec.analyses.append(cls._analysis_step(entry, names, start_type))
 
-        for name, definition in (raw.get("aggregate") or {}).items():
+        aggregate_raw = raw.get("aggregate") or {}
+        if isinstance(aggregate_raw, list):
+            spec.group_by = cls._group_by(raw.get("group_by"), start_type, spec.traverse,
+                                          spec.analyses)
+            spec.group_aggregates = cls._group_aggregates(
+                aggregate_raw, start_type, spec.traverse, spec.analyses)
+            aliases = {item.alias for item in spec.group_aggregates}
+            result_fields = set(spec.group_by) | aliases
+            spec.having = cls._result_filters(raw.get("having") or [], result_fields)
+            spec.order_by = cls._order_by(raw.get("order_by") or [], result_fields)
+        elif raw.get("group_by") or raw.get("having") or raw.get("order_by"):
+            raise QuerySpecError(
+                "'group_by', 'having' and 'order_by' require list-form 'aggregate'.")
+        elif not isinstance(aggregate_raw, dict):
+            raise QuerySpecError("'aggregate' must be an object (legacy) or a list (grouped).")
+
+        for name, definition in aggregate_raw.items() if isinstance(aggregate_raw, dict) else []:
             if not isinstance(definition, dict) or "op" not in definition:
                 raise QuerySpecError(f"Aggregate '{name}' needs an 'op'.")
             if definition["op"] not in {"count", "sum", "avg", "min", "max"}:
@@ -194,7 +240,109 @@ class QuerySpec:
             if not isinstance(raw["return"], list):
                 raise QuerySpecError("'return' must be a list of field paths.")
             spec.return_fields = list(raw["return"])
+            if spec.group_aggregates:
+                valid = set(spec.group_by) | {item.alias for item in spec.group_aggregates}
+                unknown = [path for path in spec.return_fields if path not in valid]
+                if unknown:
+                    raise QuerySpecError(
+                        f"Grouped return refers to unknown result field '{unknown[0]}'.",
+                        known=sorted(valid))
         return spec
+
+    @staticmethod
+    def _known_paths(start_type: str, traversals, analyses) -> Dict[str, str]:
+        known = {name: field.type for name, field in
+                 ((f.name, f) for f in node_type(start_type).fields)}
+        known.update({f"{start_type}.{name}": field_type
+                      for name, field_type in list(known.items())})
+        for step in traversals:
+            target = step.target_type or relation_type(step.relation).targets[0]
+            for declared in node_type(target).fields:
+                known[f"{step.name}.{declared.name}"] = declared.type
+            known[f"{step.name}.count"] = "integer"
+        for step in analyses:
+            for produced in ("count", "nearest_minutes", "completeness"):
+                known[f"{step.name}.{produced}"] = "number"
+        return known
+
+    @classmethod
+    def _group_by(cls, raw, start_type, traversals, analyses) -> List[str]:
+        if not isinstance(raw, list) or not raw:
+            raise QuerySpecError("A grouped query needs a non-empty 'group_by' list.")
+        if not all(isinstance(path, str) and path for path in raw):
+            raise QuerySpecError("Every 'group_by' entry must be a field path.")
+        known = cls._known_paths(start_type, traversals, analyses)
+        unknown = [path for path in raw if path not in known]
+        if unknown:
+            raise QuerySpecError(f"Unknown grouping field '{unknown[0]}'.", known=sorted(known))
+        return list(raw)
+
+    @classmethod
+    def _group_aggregates(cls, raw, start_type, traversals, analyses):
+        if not raw:
+            raise QuerySpecError("A grouped query needs at least one aggregate.")
+        known = cls._known_paths(start_type, traversals, analyses)
+        parsed, aliases = [], set()
+        for entry in raw:
+            if not isinstance(entry, dict):
+                raise QuerySpecError("Each aggregate must be an object.")
+            function = entry.get("function") or entry.get("op")
+            if function not in AGGREGATE_FUNCTIONS:
+                raise QuerySpecError(f"Unknown aggregate function '{function}'.",
+                                     known=sorted(AGGREGATE_FUNCTIONS))
+            source = entry.get("field")
+            alias = entry.get("as")
+            if not isinstance(alias, str) or not alias:
+                raise QuerySpecError("Each grouped aggregate needs a non-empty 'as' alias.")
+            if alias in aliases:
+                raise QuerySpecError(f"Duplicate aggregate alias '{alias}'.")
+            if function != "count" and not source:
+                raise QuerySpecError(f"Aggregate '{function}' needs a 'field'.")
+            if source not in (None, "*") and source not in known:
+                raise QuerySpecError(f"Unknown aggregate field '{source}'.", known=sorted(known))
+            if function in {"sum", "avg", "min", "max"} and known.get(source) not in NUMERIC_FIELD_TYPES:
+                raise QuerySpecError(
+                    f"Aggregate '{function}' requires a numeric field; '{source}' is "
+                    f"{known.get(source, 'unknown')}.", field=source,
+                    valid_fields=sorted(k for k, v in known.items() if v in NUMERIC_FIELD_TYPES))
+            aliases.add(alias)
+            parsed.append(GroupAggregate(function, source, alias))
+        return parsed
+
+    @staticmethod
+    def _result_filters(raw, valid_fields) -> List[ResultFilter]:
+        if not isinstance(raw, list):
+            raise QuerySpecError("'having' must be a list.")
+        result = []
+        for entry in raw:
+            if not isinstance(entry, dict) or entry.get("field") not in valid_fields:
+                raise QuerySpecError("HAVING refers to an unknown result field.",
+                                     known=sorted(valid_fields))
+            op = entry.get("op", "eq")
+            if op not in FILTER_OPS:
+                raise QuerySpecError(f"Unknown filter operator '{op}'.", known=sorted(FILTER_OPS))
+            if op in {"in", "not_in"} and not isinstance(entry.get("value"), (list, tuple)):
+                raise QuerySpecError(f"Operator '{op}' needs a list value.")
+            if op == "between" and not (isinstance(entry.get("value"), (list, tuple))
+                                         and len(entry["value"]) == 2):
+                raise QuerySpecError("Operator 'between' needs a [low, high] value.")
+            result.append(ResultFilter(entry["field"], op, entry.get("value")))
+        return result
+
+    @staticmethod
+    def _order_by(raw, valid_fields) -> List[dict]:
+        if not isinstance(raw, list):
+            raise QuerySpecError("'order_by' must be a list.")
+        result = []
+        for entry in raw:
+            if not isinstance(entry, dict) or entry.get("field") not in valid_fields:
+                raise QuerySpecError("ORDER BY refers to an unknown result field.",
+                                     known=sorted(valid_fields))
+            direction = entry.get("direction", "asc")
+            if direction not in {"asc", "desc"}:
+                raise QuerySpecError("ORDER BY direction must be 'asc' or 'desc'.")
+            result.append({"field": entry["field"], "direction": direction})
+        return result
 
     @staticmethod
     def _limit(value) -> int:
@@ -279,6 +427,10 @@ class QuerySpec:
             "traverse": [step.describe() for step in self.traverse],
             "analyses": [step.describe() for step in self.analyses],
             "aggregate": self.aggregate,
+            "group_by": self.group_by,
+            "grouped_aggregates": [item.describe() for item in self.group_aggregates],
+            "having": [item.describe() for item in self.having],
+            "order_by": self.order_by,
             "rank": self.rank,
             "return": self.return_fields,
             "limit": self.limit,
@@ -291,6 +443,9 @@ def _resolve(path: str, context: dict):
     """`Neighborhood.name`, `pharmacies.count`, `walk15.nearest_minutes`."""
     if path in context:
         return context[path]
+    start_type = context.get("_start_type")
+    if "." not in path and start_type and isinstance(context.get(start_type), dict):
+        return context[start_type].get(path)
     head, _, tail = path.partition(".")
     value = context.get(head)
     if value is None or not tail:
@@ -324,7 +479,8 @@ class QueryEngine:
         rows: List[dict] = []
         analyses_run = 0
         for node in candidates:
-            context: Dict[str, Any] = {spec.start_type: node, "id": node.get("id")}
+            context: Dict[str, Any] = {spec.start_type: node, "id": node.get("id"),
+                                       "_start_type": spec.start_type}
             if not self._apply_traversals(spec, context):
                 continue
             ok, ran = self._apply_analyses(spec, node, context)
@@ -334,7 +490,14 @@ class QueryEngine:
             self._apply_aggregates(spec, context)
             rows.append(context)
 
-        rows = self._rank(spec, rows)
+        groups_total = None
+        if spec.group_aggregates:
+            rows = self._group(spec, rows)
+            groups_total = len(rows)
+            rows = [row for row in rows if all(rule.matches(row) for rule in spec.having)]
+            rows = self._order_grouped(spec, rows)
+        else:
+            rows = self._rank(spec, rows)
         truncated = len(rows) > spec.limit
         rows = rows[:spec.limit]
 
@@ -352,6 +515,13 @@ class QueryEngine:
                 "analyses": [step.describe() for step in spec.analyses],
                 "analysis_calls": analyses_run,
                 "aggregates": sorted(spec.aggregate),
+                "group_by": spec.group_by,
+                "grouped_aggregates": [item.describe() for item in spec.group_aggregates],
+                "rows_scanned": len(rows) if groups_total is None else scanned,
+                "groups_formed": groups_total,
+                "groups_returned": len(results) if groups_total is not None else None,
+                "having": [item.describe() for item in spec.having],
+                "order_by": spec.order_by,
                 "ranked_by": spec.rank,
                 "limit": spec.limit,
                 "include_geometry": spec.include_geometry,
@@ -436,6 +606,58 @@ class QueryEngine:
             }[op]
 
     @staticmethod
+    def _group(spec: QuerySpec, rows: List[dict]) -> List[dict]:
+        grouped: Dict[tuple, List[dict]] = {}
+        for row in rows:
+            values = []
+            for path in spec.group_by:
+                value = _resolve(path, row)
+                values.append(value if isinstance(value, list) else [value])
+            for key in itertools.product(*values):
+                grouped.setdefault(tuple(key), []).append(row)
+
+        output = []
+        for key, members in grouped.items():
+            result = dict(zip(spec.group_by, key))
+            for aggregate in spec.group_aggregates:
+                values = []
+                for member in members:
+                    resolved = _resolve(aggregate.field, member) if aggregate.field not in (None, "*") else 1
+                    values.extend(resolved if isinstance(resolved, list) else [resolved])
+                present = [value for value in values if value is not None]
+                if aggregate.function == "count":
+                    result[aggregate.alias] = len(present)
+                elif aggregate.function == "count_distinct":
+                    result[aggregate.alias] = len(set(present))
+                else:
+                    numbers = [value for value in present
+                               if isinstance(value, (int, float)) and not isinstance(value, bool)]
+                    if not numbers:
+                        result[aggregate.alias] = None
+                    elif aggregate.function == "sum":
+                        result[aggregate.alias] = sum(numbers)
+                    elif aggregate.function == "avg":
+                        result[aggregate.alias] = sum(numbers) / len(numbers)
+                    elif aggregate.function == "min":
+                        result[aggregate.alias] = min(numbers)
+                    elif aggregate.function == "max":
+                        result[aggregate.alias] = max(numbers)
+            output.append(result)
+        return output
+
+    @staticmethod
+    def _order_grouped(spec: QuerySpec, rows: List[dict]) -> List[dict]:
+        ordered = list(rows)
+        for clause in reversed(spec.order_by):
+            field = clause["field"]
+            reverse = clause["direction"] == "desc"
+            present = [row for row in ordered if row.get(field) is not None]
+            missing = [row for row in ordered if row.get(field) is None]
+            present.sort(key=lambda row: row[field], reverse=reverse)
+            ordered = present + missing
+        return ordered
+
+    @staticmethod
     def _rank(spec: QuerySpec, rows: List[dict]) -> List[dict]:
         if not spec.rank:
             return rows
@@ -459,6 +681,8 @@ class QueryEngine:
                     value = {k: v for k, v in value.items() if k != "geometry"}
                 projected[path] = value
             return projected
+        if spec.group_aggregates:
+            return {key: value for key, value in row.items() if not key.startswith("_")}
         node = row[spec.start_type]
         projected = public_node(node, include_geometry=spec.include_geometry)
         for key, value in row.items():

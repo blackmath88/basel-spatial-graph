@@ -1,0 +1,10 @@
+{
+  "start": {"type": "PopulationObservation"},
+  "group_by": ["year"],
+  "aggregate": [
+    {"function": "sum", "field": "children", "as": "children_total"},
+    {"function": "sum", "field": "total", "as": "population_total"}
+  ],
+  "order_by": [{"field": "year", "direction": "asc"}],
+  "return": ["year", "children_total", "population_total"]
+}

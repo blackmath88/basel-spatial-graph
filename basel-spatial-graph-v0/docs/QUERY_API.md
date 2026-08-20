@@ -1,6 +1,6 @@
 # The query API
 
-A query is a JSON document with at most six parts. It is not Cypher, not SQL and
+A query is a validated JSON document. It is not Cypher, not SQL and
 not Python — nothing a caller sends is ever interpreted as code, and every field
 name, relation and operator is validated against
 [the schema](SPATIAL_GRAPH.md) before anything runs.
@@ -20,7 +20,10 @@ python -m app.spatial_graph.cli query examples/queries/children_pharmacy_transit
   "start":     { "type": "Neighborhood", "filters": [...], "ids": [...] },
   "traverse":  [ { "relation": "...", "target_type": "...", "as": "...", "from": "..." } ],
   "analyses":  [ { "analysis": "accessibility", "mode": "walk", "minutes": 15 } ],
-  "aggregate": { "name": { "op": "count", "of": "..." } },
+  "group_by":  [ "year" ],
+  "aggregate": [ { "function": "sum", "field": "children", "as": "children_total" } ],
+  "having":    [ { "field": "children_total", "op": "gt", "value": 10000 } ],
+  "order_by":  [ { "field": "year", "direction": "asc" } ],
   "rank":      { "by": "path", "order": "asc" },
   "return":    [ "Neighborhood.name", "pharmacies.count" ],
   "limit": 50,
@@ -111,7 +114,45 @@ parameters and would differ for others.
 At most four analyses per query. Results are memoized per (neighbourhood, mode,
 minutes, departure), and every response reports how many engine calls it made.
 
-### `aggregate`, `rank`, `return`, `limit`
+### `group_by`, grouped `aggregate`, `having`, `order_by`
+
+Grouped aggregation consumes the filtered/traversed row stream and produces one
+row per unique combination of grouping keys:
+
+```json
+{
+  "start": {"type": "PopulationObservation"},
+  "group_by": ["year"],
+  "aggregate": [
+    {"function": "sum", "field": "children", "as": "children_total"},
+    {"function": "avg", "field": "total", "as": "neighborhood_average"}
+  ],
+  "having": [{"field": "children_total", "op": "gt", "value": 10000}],
+  "order_by": [{"field": "year", "direction": "asc"}],
+  "return": ["year", "children_total", "neighborhood_average"]
+}
+```
+
+Functions are `count`, `count_distinct`, `sum`, `avg`, `min`, and `max`.
+Multiple grouping keys are supported. Aggregate aliases are required and may
+be referenced by `having`, `order_by`, and `return`. Fields are checked against
+the typed schema before execution; numeric aggregates reject non-numeric fields
+and report valid alternatives.
+
+`count` without a field counts rows; with a field it ignores null/missing
+values. Numeric aggregates ignore null/missing values and return `null` when a
+group has no numeric values. Scalar outputs from dynamic analyses can be
+grouped; nested `per_category` structures cannot.
+
+Examples live in `examples/queries/population_by_year.json`,
+`services_by_category.json`, `transit_stops_by_neighborhood.json`, and
+`top_service_neighborhoods.json`.
+
+The execution trace includes rows scanned, grouping keys, computations, groups
+formed/returned, HAVING, and ordering. Provenance includes the source datasets
+and a compact `aggregation` computation block.
+
+### Legacy per-row `aggregate`, `rank`, `return`, `limit`
 
 ```json
 "aggregate": {"service_count": {"op": "count", "of": "services"}},
@@ -120,7 +161,8 @@ minutes, departure), and every response reports how many engine calls it made.
 "limit": 25
 ```
 
-Ops: `count`, `sum`, `avg`, `min`, `max`. Paths resolve against the row —
+Existing object-form aggregate and `rank` queries remain valid. Ops are
+`count`, `sum`, `avg`, `min`, `max`. Paths resolve against the row —
 `Neighborhood.name`, `pharmacies.count`, `walk15.nearest_minutes`. Omit `return`
 and you get the whole start node plus a `<name>_count` per traversal.
 
@@ -211,10 +253,9 @@ checked or changed rather than taken on trust.
 
 ## Limitations
 
-- **No GROUP BY.** You cannot yet aggregate across rows — "total children per
-  year" needs code. This is the clearest known gap; see
-  [SPATIAL_GRAPH.md](SPATIAL_GRAPH.md#architectural-findings).
 - **No OR between filters.** Filters are conjunctive.
+- **No arbitrary joins or expressions.** Traversal follows declared relations;
+  aggregate inputs are fields, not formulas.
 - **Traversal is forward-only** along declared relations; use the declared
   inverse to go the other way.
 - **Analyses only apply to `Neighborhood`**, because that is the only type with

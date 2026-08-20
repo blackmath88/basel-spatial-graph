@@ -28,9 +28,10 @@ Reference application — the 15-Minute Basel map
 
 Spatial Graph Core — the same data, relationally queryable
   P1    Heterogeneous Basel graph        ✅
-  P2    Structured query API             ✅ (started here)
-  P3    MCP adapter                      later
-  P4    Natural-language planning        later
+  P2    Structured query API             ✅ (grouping + aggregation)
+  P2.5  Provenance foundation            🟡
+  P3    MCP adapter                      ✅
+  P4    Natural-language planning        next / later
 ```
 
 The map is now one client among several. There is a second way in: a typed
@@ -73,6 +74,18 @@ uvicorn app.main:app --reload
 ```
 
 Then open <http://127.0.0.1:8000> (API docs at <http://127.0.0.1:8000/docs>).
+
+The optional agent interface needs Python 3.10+ because FastMCP does. Keep it
+isolated from the Python 3.9-compatible reference app:
+
+```bash
+python3.10 -m venv .venv-mcp
+source .venv-mcp/bin/activate
+pip install -r requirements.txt -r requirements-mcp.txt
+python -m app.mcp.server
+```
+
+See [docs/MCP.md](docs/MCP.md) for tools and client configuration.
 
 `python -m app.prepare_data` prints exactly what it got:
 
@@ -479,7 +492,7 @@ cut short by the Rhine, the rail corridor and the motorway. Each category's near
 pytest
 ```
 
-342 tests, all deterministic and fully offline — the suite blocks socket connections outright and
+360+ tests, all deterministic and fully offline — the suite blocks socket connections outright and
 routes over tiny hand-built graphs and a four-stop synthetic timetable, so it never depends on
 OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 
@@ -488,8 +501,9 @@ OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 - **The spatial graph works at neighbourhood scale.** Every accessibility figure
   stands for a whole Wohnviertel from one representative origin, and nothing is
   population-weighted because the population data is not finer than that.
-- **The query language has no GROUP BY** — aggregating across rows still needs
-  code. It is the clearest known gap.
+- **The query language is intentionally smaller than SQL.** It supports typed
+  grouping, aggregation, HAVING and ordering, but not arbitrary joins, OR
+  expressions or derived-field formulas.
 - **Cycling is a prototype cost model**: `distance ÷ 15 km/h`. No slope, traffic stress, cycle-lane
   preference, surface, turn penalties or one-way rules — Bruderholz is a real climb and the model
   does not know. See [docs/CYCLING.md](docs/CYCLING.md).
@@ -526,5 +540,5 @@ OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 [Cycling](docs/CYCLING.md) · [Transit](docs/TRANSIT.md) · [Data & provenance](docs/DATA.md)
 
 **Spatial Graph Core** — [Concept](docs/SPATIAL_GRAPH_MCP_CONCEPT.md) ·
-[The graph](docs/SPATIAL_GRAPH.md) · [Query API](docs/QUERY_API.md) ·
+[The graph](docs/SPATIAL_GRAPH.md) · [Query API](docs/QUERY_API.md) · [MCP](docs/MCP.md) ·
 [City2Graph evaluation](docs/CITY2GRAPH.md)

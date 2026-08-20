@@ -302,6 +302,12 @@ def describe_schema() -> dict:
         "relations": {name: rel.describe() for name, rel in RELATION_TYPES.items()},
         "filter_operators": FILTER_OPS,
         "analyses": ANALYSIS_TYPES,
+        "query_language": {
+            "pipeline": ["start", "filter", "traverse", "analysis", "group_by",
+                         "aggregate", "having", "order_by", "limit", "return"],
+            "aggregate_functions": ["count", "count_distinct", "sum", "avg", "min", "max"],
+            "grouping": "One or more typed field paths; aggregate aliases may be used by HAVING, ORDER BY and return.",
+        },
         "notes": [
             "Structural relations are persisted; analytical relations are computed on demand.",
             "Geometry is excluded from responses unless include_geometry=true.",

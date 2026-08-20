@@ -81,16 +81,15 @@ domain-semantics cost, not capability. See [CITY2GRAPH.md](CITY2GRAPH.md).
 Arbitrary Cypher/SQL/Python from an untrusted caller is not an option. A small
 bounded language might be enough, or might be a trap.
 ▸ finding: small is working, and its *limits* are informative — the first thing
-it could not express (GROUP BY over node fields) is a concrete signal about
-what to build next.
+it could not express (GROUP BY over node fields) became the focused P2 extension.
 
-## Where MCP comes in — later
+## Where MCP comes in
 
 An agent should discover the graph, not be told about it in a prompt. That is
 why schema discovery is an API endpoint rather than a README section. The
 intended tools map onto functions that already exist:
 
-| Future MCP tool | Exists today as |
+| MCP tool | Core capability |
 |---|---|
 | `describe_graph` | `GET /spatial-graph/schema` |
 | `query_graph` | `POST /spatial-graph/query` |
@@ -98,11 +97,10 @@ intended tools map onto functions that already exist:
 | `compare_areas` | `GET /accessibility/compare`, `q3_adjacent_contrasts` |
 | `get_provenance` | `GET /spatial-graph/provenance/{id}` |
 
-Deliberately **not** part of this pass: the MCP server itself, and any
-natural-language layer. The question for P1 is whether a structured query can
-answer useful cross-domain Basel questions — not whether a model can write one.
-Making the deterministic layer good is the prerequisite; doing both at once
-would make it impossible to tell which half was failing.
+P3 now implements these five tools as a thin FastMCP adapter over the same
+Python service functions. A natural-language layer remains deliberately absent:
+the MCP client is the model, while this server stays deterministic and auditable.
+See [MCP.md](MCP.md).
 
 ## What would make this worth continuing
 

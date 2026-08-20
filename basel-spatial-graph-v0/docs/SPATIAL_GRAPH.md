@@ -195,11 +195,11 @@ Same answers, same load time, within ~2×. **Performance is not the deciding
 factor at 4,000 nodes.** If DuckDB earns its place later it will be on
 ergonomics, not speed.
 
-**Ergonomics is where DuckDB actually won.** The third query — total children
-per year across all neighbourhoods — is one `GROUP BY` in SQL and *cannot be
-expressed in our query language at all*; the NetworkX side needed hand-written
-Python. That is the most useful thing this spike produced: a concrete, small
-gap rather than an abstract preference.
+**Ergonomics is where DuckDB exposed a real gap.** The third query — total
+children per year across all neighbourhoods — was one `GROUP BY` in SQL and
+previously needed hand-written Python on the NetworkX side. P2 has now closed
+that gap with typed grouping, aggregation, HAVING and ordering while retaining
+the current store.
 
 **The persisted/dynamic split is the load-bearing idea.** It keeps the graph
 at 4 MB instead of hundreds, keeps answers correct when parameters change, and —
@@ -208,7 +208,8 @@ asking.
 
 **A custom DSL was the right call, so far.** Six parts, validated against the
 schema, no arbitrary strings reaching an engine. Its limits are informative
-rather than annoying: the GROUP BY gap above is the first real one.
+rather than annoying: the GROUP BY gap above was the first real one, and the DSL
+grew specifically to cover it.
 
 **Small graph, large questions.** The interesting cost is not traversal — the
 whole graph traverses in under a millisecond. It is the accessibility engine
@@ -229,7 +230,8 @@ adopted for P1. The full reasoning, with numbers, is in
   represent it well.
 - **Population is per neighbourhood only**, so nothing is population-weighted
   and no sub-area analysis is possible.
-- **No GROUP BY** in the query language yet.
+- **No arbitrary joins or derived-field expressions** in the query language;
+  grouping follows the validated row stream and declared field paths.
 - **`ADJACENT_TO` is polygon contact**, not walkability — two neighbourhoods can
   touch across a motorway.
 - **Accessibility counts are not quality.** One kiosk counts as one grocery.

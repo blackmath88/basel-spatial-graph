@@ -138,7 +138,7 @@ def query_provenance(graph, spec, analysis_stats: Optional[dict] = None) -> dict
         for step in spec.analyses
     ]
     metadata = graph.metadata or {}
-    return {
+    result = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "graph_generated_at": metadata.get("generated_at"),
         "graph_mode": metadata.get("mode"),
@@ -150,3 +150,11 @@ def query_provenance(graph, spec, analysis_stats: Optional[dict] = None) -> dict
         "classification_key": CLASSIFICATIONS,
         "analysis_engine": analysis_stats,
     }
+    if spec.group_aggregates:
+        result["aggregation"] = {
+            "classification": "derived",
+            "group_by": spec.group_by,
+            "computations": [item.describe() for item in spec.group_aggregates],
+            "null_semantics": "Missing values are ignored; numeric aggregates with no values return null.",
+        }
+    return result

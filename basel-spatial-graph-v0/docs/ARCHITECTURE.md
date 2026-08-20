@@ -123,6 +123,25 @@ prepared caches
 The Spatial Graph Core is deliberately *additional*. It does not replace the routing structures and
 does not copy them — see [SPATIAL_GRAPH.md](SPATIAL_GRAPH.md). Its own module layout:
 
+FastAPI, the CLI and MCP are peers over the same service layer:
+
+```text
+Map / FastAPI       CLI          AI client
+      │              │               │
+      └──────────────┼────────────── MCP
+                     │               │
+                 SpatialGraphService
+                  ↙              ↘
+          typed graph         routing analytics
+                  ↘              ↙
+                    provenance
+```
+
+`app/mcp/tools.py` delegates directly to `SpatialGraphService`;
+`app/mcp/server.py` only registers those functions with FastMCP. MCP never calls
+FastAPI over HTTP and never reimplements graph or routing logic. FastMCP is an
+optional Python 3.10+ dependency, preserving the established Python 3.9 app.
+
 ```text
 app/spatial_graph/
   schema.py       node types, relation types, operators, analyses — machine-readable
@@ -136,6 +155,10 @@ app/spatial_graph/
   cli.py          query it without FastAPI or a map
   fixtures.py     a fully synthetic graph, for tests
 ```
+
+The query executor has two compatible aggregate paths. Original object-form
+per-start-row aggregates remain intact. List-form aggregates run after
+filter/traversal/analysis as typed GROUP BY → HAVING → ORDER BY operations.
 
 ## Where the service logic lives
 

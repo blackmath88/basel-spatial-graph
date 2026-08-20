@@ -1,0 +1,7 @@
+{
+  "start": {"type": "ServiceLocation"},
+  "group_by": ["category"],
+  "aggregate": [{"function": "count", "as": "service_count"}],
+  "order_by": [{"field": "service_count", "direction": "desc"}],
+  "return": ["category", "service_count"]
+}

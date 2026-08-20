@@ -1,0 +1,3 @@
+# Optional agent interface. FastMCP requires Python >=3.10; install this in a
+# separate environment so the Python 3.9 reference application is unaffected.
+fastmcp==2.14.5
