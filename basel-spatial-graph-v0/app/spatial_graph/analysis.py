@@ -31,6 +31,7 @@ class AccessibilityAnalysis:
         self._cache: Dict[tuple, dict] = {}
         self.calls = 0
         self.cache_hits = 0
+        self._trace = []
 
     @property
     def available_modes(self):
@@ -38,6 +39,29 @@ class AccessibilityAnalysis:
 
     def clear_cache(self) -> None:
         self._cache.clear()
+
+    def begin_trace(self) -> None:
+        self._trace = []
+
+    def traced_computations(self) -> list:
+        """Semantic computations requested since begin_trace(), deduplicated."""
+        result = {}
+        for item in self._trace:
+            key = item["id"]
+            if key in result and result[key] != item:
+                suffix = 2
+                while f"{key}_{suffix}" in result:
+                    suffix += 1
+                item = {**item, "id": f"{key}_{suffix}"}
+                key = item["id"]
+            result.setdefault(key, item)
+        return list(result.values())
+
+    def _record_trace(self, profile: dict, travel_mode) -> None:
+        provenance = dict(profile.get("provenance") or {})
+        provenance["origin_method"] = self.origin_method
+        provenance["service_sources"] = self.service_sources(travel_mode)
+        self._trace.append({"id": f"{travel_mode.value}_accessibility", **provenance})
 
     # -- the runner the query engine calls ------------------------------------
     def __call__(self, node: dict, kind: str, params: dict) -> dict:
@@ -87,18 +111,26 @@ class AccessibilityAnalysis:
         travel_mode = parse_mode(mode) if isinstance(mode, str) else mode
         engine = self.engines.get(travel_mode)
         services = getattr(getattr(engine, "services", None), "services", [])
-        seen, rows = set(), []
+        grouped = {}
         for service in services:
             if category and service.category.value != category:
                 continue
             provenance = service.provenance
-            key = (provenance.get("source"), provenance.get("dataset"),
-                   provenance.get("source_url"), provenance.get("license"))
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append({key: provenance.get(key) for key in
-                         ("source", "dataset", "source_url", "license", "retrieved_at")})
+            # A source URL may identify one OSM feature. This registry is for
+            # contributing provider/dataset pairs, not every reachable POI.
+            key = (provenance.get("source"), provenance.get("dataset"))
+            group = grouped.setdefault(key, {
+                name: provenance.get(name) for name in
+                ("source", "dataset", "license", "retrieved_at")})
+            group.setdefault("_source_urls", set()).add(provenance.get("source_url"))
+        rows = []
+        for key in sorted(grouped, key=lambda item: tuple(str(value or "") for value in item)):
+            group = grouped[key]
+            urls = {url for url in group.pop("_source_urls") if url}
+            # Do not present one record URL as if it described the whole
+            # provider/dataset dependency.
+            group["source_url"] = next(iter(urls)) if len(urls) == 1 else None
+            rows.append(group)
         return rows
 
     def profile(self, node: dict, mode: str = "walk", minutes: float = 15,
@@ -113,7 +145,9 @@ class AccessibilityAnalysis:
         key = (node_id, travel_mode.value, minutes, departure_time, max_transfers)
         if key in self._cache:
             self.cache_hits += 1
-            return self._cache[key]
+            profile = self._cache[key]
+            self._record_trace(profile, travel_mode)
+            return profile
         engine = self.engines.get(travel_mode)
         if engine is None:
             raise QuerySpecError(
@@ -155,6 +189,7 @@ class AccessibilityAnalysis:
                            if key != "generated_at"},
         }
         self._cache[key] = profile
+        self._record_trace(profile, travel_mode)
         return profile
 
     def stats(self) -> dict:

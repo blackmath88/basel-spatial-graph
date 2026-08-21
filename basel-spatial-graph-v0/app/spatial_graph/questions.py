@@ -154,6 +154,7 @@ def adjacent_contrasts(graph, analysis, mode: str = "walk", minutes: float = DEF
         question="Which adjacent neighbourhoods differ most in service accessibility?",
         mode=mode, minutes=minutes,
         results=pairs[:limit], total_pairs=len(pairs),
+        _provenance={"types": ["Neighborhood"], "relations": ["ADJACENT_TO"]},
         methodology=(
             "Adjacency is a persisted structural relation (polygon boundary contact). For each "
             "adjacent pair, the six essential categories are counted from a live accessibility "

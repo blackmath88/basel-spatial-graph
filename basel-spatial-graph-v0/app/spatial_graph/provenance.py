@@ -52,6 +52,7 @@ def entity_provenance(node: dict) -> dict:
         "id": node.get("id"),
         "type": node_type,
         "classification": classification,
+        "data_mode": provenance.get("mode"),
         "explanation": CLASSIFICATIONS[classification],
         "source": provenance.get("source"),
         "dataset": provenance.get("dataset") or provenance.get("feed"),
@@ -162,12 +163,17 @@ def source_registry(graph, computations=None) -> dict:
             sources["transit_feed"] = _source_record("observed", transit)
         for index, item in enumerate(computation.get("service_sources") or []):
             key = "service_" + str(index + 1)
-            while key in sources and sources[key].get("dataset") != item.get("dataset"):
+            while key in sources and (
+                    sources[key].get("dataset"), sources[key].get("source")) != (
+                        item.get("dataset"), item.get("source")):
                 index += 1
                 key = "service_" + str(index + 1)
             sources[key] = _source_record("observed", item)
             if metadata.get("mode") == "fixture" and sources[key].get("data_mode") is None:
                 sources[key]["data_mode"] = "fixture"
+    for source in sources.values():
+        if source.get("data_mode") is None:
+            source["data_mode"] = metadata.get("mode")
     return sources
 
 
@@ -195,6 +201,37 @@ def _computation_registry(computations, sources) -> dict:
         item["source_refs"] = refs
         result[key] = item
     return result
+
+
+def _entity_source_refs(graph, sources: dict, type_name: str, filters=()) -> List[str]:
+    """Register every provider/dataset contributing matching graph records."""
+    classification = "official" if type_name in {"Neighborhood", "PopulationObservation"} \
+        else "observed"
+    refs = []
+    seen = set()
+    for node in graph.nodes_of_type(type_name):
+        if filters and not all(rule.matches(node) for rule in filters):
+            continue
+        provenance = node.get("provenance") or {}
+        identity = (provenance.get("source"),
+                    provenance.get("dataset") or provenance.get("feed"))
+        if identity == (None, None) or identity in seen:
+            continue
+        seen.add(identity)
+        existing = next((key for key, row in sources.items()
+                         if (row.get("source"), row.get("dataset")) == identity), None)
+        if existing:
+            refs.append(existing)
+            continue
+        base = "entity_" + type_name.lower()
+        key, suffix = base, 2
+        while key in sources:
+            key, suffix = f"{base}_{suffix}", suffix + 1
+        sources[key] = _source_record(classification, provenance)
+        if sources[key].get("data_mode") is None:
+            sources[key]["data_mode"] = (graph.metadata or {}).get("mode")
+        refs.append(key)
+    return refs
 
 
 def shared_provenance(graph, *, types=None, relations=None, analyses=None,
@@ -259,6 +296,37 @@ def query_provenance(graph, spec, analysis_stats: Optional[dict] = None) -> dict
         graph, types=types, relations=relations, analyses=analyses,
         computations=actual, fields=fields, quality=quality,
         analysis_stats=analysis_stats)
+
+    start_refs = _entity_source_refs(
+        graph, result["sources"], spec.start_type, spec.start_filters)
+    traversal_refs = {
+        step.name: _entity_source_refs(
+            graph, result["sources"],
+            step.target_type or RELATION_TYPES[step.relation].targets[0], step.filters)
+        for step in spec.traverse
+    }
+    for path in spec.return_fields or []:
+        field_key = f"results[].{path}"
+        if field_key in result["fields"]:
+            continue
+        head, dot, leaf = path.partition(".")
+        traversal = next((step for step in spec.traverse if step.name == head), None)
+        if traversal:
+            if leaf == "count":
+                result["fields"][field_key] = {
+                    "classification": "derived", "relation": traversal.relation,
+                    "method": "count distinct traversed target nodes",
+                    "source_refs": traversal_refs.get(head, [])}
+            else:
+                result["fields"][field_key] = {
+                    "classification": "observed",
+                    "source_refs": traversal_refs.get(head, [])}
+        elif not dot or head == spec.start_type:
+            result["fields"][field_key] = {
+                "classification": ("official" if spec.start_type in
+                                   {"Neighborhood", "PopulationObservation"} else "observed"),
+                "source_refs": start_refs}
+
     if spec.group_aggregates:
         result["aggregation"] = {
             "classification": "derived",
@@ -266,4 +334,22 @@ def query_provenance(graph, spec, analysis_stats: Optional[dict] = None) -> dict
             "computations": [item.describe() for item in spec.group_aggregates],
             "null_semantics": "Missing values are ignored; numeric aggregates with no values return null.",
         }
+        for aggregate in spec.group_aggregates:
+            source_refs = start_refs
+            if aggregate.field and "." in aggregate.field:
+                source_refs = traversal_refs.get(aggregate.field.split(".", 1)[0], start_refs)
+            result["computations"][aggregate.alias] = {
+                "classification": "derived", "method": aggregate.function,
+                "input_field": aggregate.field or "*", "group_by": spec.group_by,
+                "null_semantics": result["aggregation"]["null_semantics"],
+                "source_refs": source_refs,
+            }
+            result["fields"][f"results[].{aggregate.alias}"] = {
+                "classification": "derived", "computation_ref": aggregate.alias}
+        for path in spec.group_by:
+            result["fields"].setdefault(
+                f"results[].{path}",
+                {"classification": ("official" if spec.start_type in
+                                    {"Neighborhood", "PopulationObservation"} else "observed"),
+                 "source_refs": start_refs})
     return result

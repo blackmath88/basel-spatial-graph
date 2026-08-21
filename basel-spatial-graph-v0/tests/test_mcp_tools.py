@@ -69,6 +69,7 @@ def test_entity_and_relation_provenance(tools):
     entity = tools.get_provenance("population:a:2025")
     relation = tools.get_provenance("REACHABLE_WITHIN")
     assert entity["classification"] == "official"
+    assert entity["data_mode"] == "fixture"
     assert entity["reference_year"] == 2025
     assert relation["persisted"] is False
     assert relation["classification"] == "dynamic"

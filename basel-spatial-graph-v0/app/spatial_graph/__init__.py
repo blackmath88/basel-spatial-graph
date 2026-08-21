@@ -137,8 +137,9 @@ class SpatialGraphService:
 
             raise UnknownEntityError(
                 f"'{entity_id}' is a {node.get('type')}, not a {type_name}.")
-        return {**public_node(node, include_geometry),
-                "provenance": entity_provenance(node)}
+        provenance = entity_provenance(node)
+        provenance["data_mode"] = provenance.get("data_mode") or self.graph.metadata.get("mode")
+        return {**public_node(node, include_geometry), "provenance": provenance}
 
     def neighbors(self, type_name: str, entity_id: str, relation: Optional[str] = None,
                   target_type: Optional[str] = None, limit: int = 100,
@@ -198,6 +199,7 @@ class SpatialGraphService:
         if name not in QUESTIONS:
             raise QuerySpecError(f"Unknown question '{name}'.", known=sorted(QUESTIONS))
         before = self.analysis.stats()
+        self.analysis.begin_trace()
         answer = QUESTIONS[name](self.graph, self.analysis, **params)
         after = self.analysis.stats()
         descriptor = answer.pop("_provenance", {})
@@ -222,7 +224,7 @@ class SpatialGraphService:
                         caveat["applies_to"].append(
                             "results[].transit_stops_in_walking_range")
         relations = [relation_provenance(item) for item in descriptor.get("relations", [])]
-        computations = descriptor.get("computations", [])
+        computations = descriptor.get("computations") or self.analysis.traced_computations()
         answer["provenance"] = shared_provenance(
             self.graph, types=descriptor.get("types", ["Neighborhood"]),
             relations=relations,
@@ -243,8 +245,11 @@ class SpatialGraphService:
 
     def provenance(self, entity_id: str) -> dict:
         if entity_id in RELATION_TYPES:
-            return relation_provenance(entity_id)
-        return entity_provenance(self.graph.get_node(entity_id))
+            result = relation_provenance(entity_id)
+        else:
+            result = entity_provenance(self.graph.get_node(entity_id))
+        result["data_mode"] = result.get("data_mode") or self.graph.metadata.get("mode")
+        return result
 
     def status(self) -> dict:
         metadata = dict(self.graph.metadata)

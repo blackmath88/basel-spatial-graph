@@ -491,11 +491,26 @@ def test_query_results_explain_themselves(service):
     assert provenance["population_reference_year"]
 
 
+def test_structural_return_field_links_relation_and_all_matching_sources(service):
+    result = run(service, {
+        "start": {"type": "Neighborhood"},
+        "traverse": [{"relation": "HAS_SERVICE", "target_type": "ServiceLocation",
+                      "as": "pharmacies",
+                      "filters": [{"field": "category", "op": "eq", "value": "pharmacy"}]}],
+        "return": ["Neighborhood.name", "pharmacies.count"],
+    })
+    field = result["provenance"]["fields"]["results[].pharmacies.count"]
+    assert field["classification"] == "derived"
+    assert field["relation"] == "HAS_SERVICE"
+    assert field["source_refs"]
+
+
 def test_entity_provenance_classifies_its_source(service):
     area = service.entity("Neighborhood", "area:a")["provenance"]
     assert area["classification"] == "official"
     observation = service.provenance("population:a:2025")
     assert observation["classification"] == "official"
+    assert observation["data_mode"] == "fixture"
     assert observation["age_group_definitions"]["children"]
     relation = service.provenance("REACHABLE_WITHIN")
     assert relation["persisted"] is False
@@ -529,6 +544,10 @@ def test_q2_thresholds_can_be_overridden(service):
 def test_q3_adjacent_contrasts(service):
     answer = service.ask("q3_adjacent_contrasts")
     assert answer["total_pairs"] >= 1
+    relation = answer["provenance"]["relations_traversed"][0]
+    assert relation["relation"] == "ADJACENT_TO"
+    assert relation["classification"] == "derived"
+    assert relation["persisted"] is True
     for pair in answer["results"]:
         assert pair["difference"] == abs(pair["a_reachable"] - pair["b_reachable"])
         assert pair["largest_category_gap"]["category"]
@@ -613,6 +632,32 @@ def test_q6_structural_transit_fallback_is_explicit():
                    for row in answer["provenance"]["quality"]["caveats"])
 
 
+def test_accessibility_provenance_lists_every_contributing_poi_dataset():
+    from dataclasses import replace
+    from app.modes import TravelMode
+    from app.spatial_graph.fixtures import fixture_service
+
+    service = fixture_service()
+    engine = service.analysis.engines[TravelMode.WALK]
+    pharmacy = next(item for item in engine.services.services
+                    if item.category.value == "pharmacy")
+    second = replace(pharmacy, id="service:second-provider", source="second provider",
+                     source_dataset="second dataset",
+                     source_url="https://example.test/dataset")
+    engine.services.services.append(second)
+    engine.services.by_category[second.category].append(second)
+
+    provenance = service.ask("q6_children_underserved")["provenance"]
+    computation = provenance["computations"]["pharmacy_access"]
+    dependencies = {(provenance["sources"][key]["source"],
+                     provenance["sources"][key]["dataset"])
+                    for key in computation["source_refs"] if key.startswith("service_")}
+    assert dependencies == {
+        ("synthetic fixture", "Synthetic Basel-centred service fixture"),
+        ("second provider", "second dataset"),
+    }
+
+
 def test_missing_quality_metadata_does_not_break_q6():
     from app.spatial_graph.fixtures import fixture_service
 
@@ -630,6 +675,10 @@ def test_every_question_returns_a_methodology(service):
         assert answer["methodology"], name
         assert answer["question"], name
         assert answer["provenance"]["graph_mode"] == "fixture", name
+        assert answer["provenance"]["computations"], name
+        dynamic = [item for item in answer["provenance"]["computations"].values()
+                   if item.get("classification") == "dynamic"]
+        assert dynamic and all(item.get("algorithm") for item in dynamic), name
 
 
 def test_an_unknown_question_is_refused(service):

@@ -135,6 +135,12 @@ def test_grouped_provenance_and_execution_trace(service):
     assert result["execution"]["rows_scanned"] == 4
     assert result["execution"]["groups_formed"] == 2
     assert result["execution"]["groups_returned"] == 2
+    field = result["provenance"]["fields"]["results[].children_total"]
+    computation = result["provenance"]["computations"][field["computation_ref"]]
+    assert field["classification"] == "derived"
+    assert computation["method"] == "sum"
+    assert computation["input_field"] == "children"
+    assert computation["source_refs"] == ["population"]
 
 
 def test_grouping_after_traversal(service):
