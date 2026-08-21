@@ -634,10 +634,14 @@ cut short by the Rhine, the rail corridor and the motorway. Each category's near
 pytest
 ```
 
-385 tests, all deterministic and fully offline — the suite blocks socket connections outright and
+386 tests, all deterministic and fully offline — the suite blocks socket connections outright and
 routes over tiny hand-built graphs and a four-stop synthetic timetable, so it never depends on
 OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable, and never on the committed
 snapshot either.
+
+With the quick-start install alone, 383 pass and 3 skip explicitly: two OpenStreetMap POI-source
+tests need `geopandas` (`requirements-prepare.txt`) and one MCP test needs `fastmcp`
+(`requirements-mcp.txt`). Install those and all 386 run.
 
 ## Known limitations
 
