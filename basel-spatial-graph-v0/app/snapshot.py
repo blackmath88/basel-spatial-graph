@@ -58,8 +58,9 @@ STATE_LABELS = {
 STATE_EXPLANATIONS = {
     FROZEN: ("The frozen snapshot committed to this repository: real Basel data "
              "prepared once and shipped as files. Real, but not current."),
-    LOCAL: ("Prepared on this machine by `python -m app.prepare_data`, and no "
-            "longer identical to the committed snapshot."),
+    LOCAL: ("Prepared on this machine since the snapshot was frozen, and no "
+            "longer identical to it. Real data, and newer than what the "
+            "repository ships."),
     FIXTURE: ("Synthetic fixture data. Deterministic and offline, but not Basel — "
               "no figure derived from it describes the real city."),
     ABSENT: "No prepared artefact and no fixture fallback recorded.",
