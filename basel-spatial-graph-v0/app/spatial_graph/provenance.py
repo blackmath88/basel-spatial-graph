@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from .schema import RELATION_TYPES
 from ..data_quality import relevant_caveats
+from ..snapshot import runtime_snapshot
 
 CLASSIFICATIONS = {
     "observed": "Recorded by a data provider (a POI, a stop, a timetable entry).",
@@ -246,6 +247,9 @@ def shared_provenance(graph, *, types=None, relations=None, analyses=None,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "graph_generated_at": metadata.get("generated_at"),
         "graph_mode": metadata.get("mode"),
+        # Frozen snapshot, prepared locally, or fixture — the same distinction
+        # /health draws, carried into every answer that leaves the process.
+        "data_state": runtime_snapshot().block("spatial_graph", metadata.get("mode")),
         "origin_method": metadata.get("origin_method") if analyses else None,
         "population_reference_year": metadata.get("population_reference_year"),
         "datasets": datasets_used(graph, types or []),

@@ -8,6 +8,11 @@
                               | --entities-only | --transit-only
 
 The API server never downloads anything: it loads these caches at startup.
+
+`data/processed/` ships in the repository as a frozen snapshot, so this script
+is the *refresh* mechanism, not a prerequisite for running the server. It ends
+by comparing what it prepared with the committed snapshot; re-freezing that
+snapshot is a separate, deliberate `python -m app.snapshot --write`.
 """
 from __future__ import annotations
 
@@ -439,9 +444,16 @@ def main(argv=None) -> int:
         statuses["spatial graph"] = (LIVE_BANNER if graph.metadata["mode"] == "live"
                                      else FIXTURE_BANNER)
 
+    from .snapshot import print_check
+
+    print()
+    matches = print_check()
+    statuses["snapshot"] = ("frozen snapshot (unchanged)" if matches
+                            else "local (differs from the committed snapshot)")
+
     print("\n" + "-" * 58)
     for label in ("streets", "bike", "entities", "services", "transit", "population",
-                  "spatial graph"):
+                  "spatial graph", "snapshot"):
         if label in statuses:
             print(f"status  {label + ':':<10}{statuses[label]}")
     failed = FIXTURE_BANNER in statuses.values()

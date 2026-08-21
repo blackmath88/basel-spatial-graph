@@ -1,16 +1,19 @@
 .venv/
+.venv-mcp/
 __pycache__/
 .pytest_cache/
 *.pyc
 .DS_Store
 
-# Prepared data caches — rebuild with `python -m app.prepare_data`
+# Raw download caches: inputs to preparation, never read by the server.
+# The GTFS archive alone is 224 MB and the Overpass cache another 24 MB.
 data/raw/*.json
 data/raw/osmnx_cache/
 data/raw/gtfs/
-data/processed/*.json
-data/processed/*.graphml
-data/processed/*.npz
+
+# data/processed/ is deliberately NOT ignored. It holds the frozen snapshot of
+# real Basel data this repository ships, so `git clone && uvicorn` works with no
+# downloads. See data/processed/SNAPSHOT.json and `python -m app.snapshot`.
 
 # Derived experiment output — regenerate with the scripts in experiments/
 experiments/export/

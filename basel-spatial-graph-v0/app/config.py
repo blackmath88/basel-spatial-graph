@@ -37,6 +37,8 @@ POPULATION_CACHE = PROCESSED_DIR / "basel_population.json"
 POPULATION_YEARS = int(os.getenv("BASEL_POPULATION_YEARS", "10"))
 # The heterogeneous spatial graph, written by `python -m app.prepare_spatial_graph`.
 SPATIAL_GRAPH_CACHE = PROCESSED_DIR / "basel_spatial_graph.json"
+# Manifest of the frozen snapshot committed to the repository. See app/snapshot.py.
+SNAPSHOT_MANIFEST = PROCESSED_DIR / "SNAPSHOT.json"
 
 # --- Travel modes ---------------------------------------------------------
 # Cached, normalized networks. Written by `python -m app.prepare_data`.

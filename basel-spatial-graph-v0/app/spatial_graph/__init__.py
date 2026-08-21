@@ -15,6 +15,7 @@ from typing import Dict, Optional
 
 from ..config import SPATIAL_GRAPH_CACHE
 from ..errors import SpatialGraphUnavailableError
+from ..snapshot import runtime_snapshot
 from .analysis import AccessibilityAnalysis
 from .builder import ORIGIN_METHOD, build_spatial_graph
 from .model import MAX_RESULTS, NetworkXSpatialGraph, SpatialGraphStore, public_node
@@ -256,6 +257,7 @@ class SpatialGraphService:
         return {
             "available": self.available,
             "mode": metadata.get("mode"),
+            "data_state": runtime_snapshot().block("spatial_graph", metadata.get("mode")),
             "generated_at": metadata.get("generated_at"),
             "cache_path": metadata.get("cache_path"),
             "fallback_reason": self.fallback_reason,

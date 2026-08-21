@@ -192,16 +192,30 @@ async function addEntityLayer(kind, style, color) {
 
 // --- controls ----------------------------------------------------------------
 function renderBadges(h) {
-  const set = (id, label, mode, reason) => {
+  // Three states, not two: real-but-frozen is neither `live` nor `fixture`.
+  const set = (id, label, block) => {
     const el = $(id);
-    el.textContent = `${label}: ${mode}`;
-    el.className = 'badge ' + (mode === 'live' ? 'live' : 'fixture');
-    el.title = reason || '';
+    const state = (block.data_state || {}).state || block.mode;
+    const text = state === 'frozen' ? 'frozen' : state === 'local' ? 'live' : state;
+    el.textContent = `${label}: ${text}`;
+    el.className = 'badge ' + (state === 'fixture' ? 'fixture' : state === 'frozen' ? 'frozen' : 'live');
+    el.title = block.fallback_reason || (block.data_state || {}).explanation || '';
   };
-  set('badge-streets', 'streets', h.streets.mode, h.streets.fallback_reason);
-  set('badge-bike', 'bike', h.bike.mode, h.bike.fallback_reason);
-  set('badge-transit', 'transit', h.transit.mode, h.transit.fallback_reason);
-  set('badge-services', 'services', h.services.mode, h.services.fallback_reason);
+  set('badge-streets', 'streets', h.streets);
+  set('badge-bike', 'bike', h.bike);
+  set('badge-transit', 'transit', h.transit);
+  set('badge-services', 'services', h.services);
+  const snapshot = h.snapshot || {};
+  const note = $('badge-snapshot');
+  if (note) {
+    note.textContent = snapshot.is_frozen_snapshot
+      ? `snapshot: ${snapshot.snapshot_id || 'frozen'}` : `data: ${snapshot.label || 'local'}`;
+    note.className = 'badge ' + (snapshot.is_frozen_snapshot ? 'frozen' : '');
+    note.title = [snapshot.note, snapshot.valid_until
+      ? `Timetable valid to ${snapshot.valid_until}.` : '',
+      `Refresh: ${snapshot.refresh_command || 'python -m app.prepare_data'}`]
+      .filter(Boolean).join(' ');
+  }
 }
 
 function renderModes() {

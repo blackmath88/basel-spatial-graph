@@ -38,6 +38,7 @@ from .service_model import (
 )
 from .multimodal import DEFAULT_MAX_TRANSFERS, MAX_TRANSFERS_LIMIT, MultimodalAccessibilityService
 from .service_sources import load_services
+from .snapshot import runtime_snapshot
 from .spatial_graph import SpatialGraphService
 from .street_sources import load_network
 from .transit_sources import load_transit
@@ -81,6 +82,25 @@ if FIXTURE_MODE:
     SPATIAL_GRAPH = SpatialGraphService(_fixture_graph()[0], engines=SERVICES_BY_MODE)
 else:
     SPATIAL_GRAPH = SpatialGraphService.load(engines=SERVICES_BY_MODE)
+
+
+# Which of the three data states each subsystem is running on: the committed
+# frozen snapshot, something prepared locally since, or the synthetic fixture.
+DATA_MODES = {
+    "entities": DATA.get("mode"),
+    "walk": STREETS.mode,
+    "bike": BIKE_NETWORK.mode,
+    "services": SERVICES.mode,
+    "transit": TRANSIT.mode,
+    "spatial_graph": (SPATIAL_GRAPH.graph.metadata.get("mode")
+                      if SPATIAL_GRAPH else "fixture" if FIXTURE_MODE else None),
+}
+SNAPSHOT = runtime_snapshot()
+
+
+def data_state(key: str) -> dict:
+    """The `data_state` block one subsystem reports."""
+    return SNAPSHOT.block(key, DATA_MODES.get(key))
 
 
 def spatial_graph() -> SpatialGraphService:
@@ -137,8 +157,10 @@ def health():
     bike_stats = BIKE_NETWORK.stats()
     return {
         "ok": True,
+        "snapshot": SNAPSHOT.describe(DATA_MODES),
         "entities": {
             "mode": DATA.get("mode"),
+            "data_state": data_state("entities"),
             "source": DATA.get("source", "synthetic fixture"),
             "fallback_reason": DATA.get("fallback_reason"),
             "areas": len(DATA.get("areas", [])),
@@ -147,6 +169,7 @@ def health():
         },
         "streets": {
             "mode": stats["mode"],
+            "data_state": data_state("walk"),
             "source": stats["source"],
             "fallback_reason": STREETS.fallback_reason,
             "nodes": stats["nodes"],
@@ -160,6 +183,7 @@ def health():
         },
         "bike": {
             "mode": bike_stats["mode"],
+            "data_state": data_state("bike"),
             "source": bike_stats["source"],
             "fallback_reason": BIKE_NETWORK.fallback_reason,
             "nodes": bike_stats["nodes"],
@@ -171,6 +195,7 @@ def health():
         },
         "services": {
             "mode": SERVICES.mode,
+            "data_state": data_state("services"),
             "fallback_reason": SERVICES.fallback_reason,
             "total": len(SERVICES.services),
             "routable": sum(1 for s in SERVICES.services if s.is_routable),
@@ -180,6 +205,7 @@ def health():
         },
         "transit": {
             "mode": TRANSIT.mode,
+            "data_state": data_state("transit"),
             "available": MULTIMODAL.available,
             "fallback_reason": TRANSIT.fallback_reason,
             "source": TRANSIT.provenance.get("source"),
@@ -195,6 +221,7 @@ def health():
         "spatial_graph": {
             "available": SPATIAL_GRAPH is not None,
             "mode": SPATIAL_GRAPH.graph.metadata.get("mode") if SPATIAL_GRAPH else None,
+            "data_state": data_state("spatial_graph"),
             "nodes": SPATIAL_GRAPH.graph.graph.number_of_nodes() if SPATIAL_GRAPH else 0,
             "edges": SPATIAL_GRAPH.graph.graph.number_of_edges() if SPATIAL_GRAPH else 0,
             "generated_at": SPATIAL_GRAPH.graph.metadata.get("generated_at") if SPATIAL_GRAPH else None,
@@ -203,6 +230,7 @@ def health():
         },
         "data_quality": {
             "available": bool(QUALITY),
+            "data_state": data_state("data_quality"),
             "warning_count": len(QUALITY.get("warnings", [])) if QUALITY else 0,
             "generated_at": QUALITY.get("generated_at") if QUALITY else None,
         },
@@ -243,7 +271,7 @@ def health():
 @app.get("/data/status", tags=["data"])
 def data_status():
     """Concise generated data-quality report (see data/processed/data_quality.json)."""
-    return concise(QUALITY)
+    return {"snapshot": SNAPSHOT.describe(DATA_MODES), **concise(QUALITY)}
 
 
 # --- services ----------------------------------------------------------------

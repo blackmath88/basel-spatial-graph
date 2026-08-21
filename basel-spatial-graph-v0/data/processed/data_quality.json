@@ -1,0 +1,796 @@
+{
+  "generated_at": "2026-08-20T19:52:43+00:00",
+  "warnings": [
+    "7 'school' location(s) snap further than 150 m to the nearest street.",
+    "34 possible duplicate 'school' pair(s) within 25 m.",
+    "5 'grocery' location(s) have no upstream name.",
+    "6 'healthcare' location(s) could not be attached to the bike network.",
+    "6 'healthcare' location(s) could not be attached to the walking network.",
+    "8 'healthcare' location(s) snap further than 150 m to the nearest street.",
+    "14 possible duplicate 'healthcare' pair(s) within 25 m.",
+    "1 'healthcare' location(s) have no upstream name.",
+    "1 possible duplicate 'park' pair(s) within 25 m.",
+    "3 'sport' location(s) could not be attached to the bike network.",
+    "3 'sport' location(s) could not be attached to the walking network.",
+    "13 'sport' location(s) snap further than 150 m to the nearest street.",
+    "20 possible duplicate 'sport' pair(s) within 25 m.",
+    "10 'culture' location(s) could not be attached to the bike network.",
+    "10 'culture' location(s) could not be attached to the walking network.",
+    "5 'culture' location(s) snap further than 150 m to the nearest street.",
+    "1154 transit stop(s) could not be attached to the walking network.",
+    "43 transit stop(s) snap further than 150 m to the nearest street."
+  ],
+  "networks": {
+    "walk": {
+      "network": "walk",
+      "mode": "live",
+      "source": "OpenStreetMap / OSMnx",
+      "nodes": 14102,
+      "edges": 19258,
+      "total_length_km": 884.1,
+      "crs": "EPSG:4326",
+      "metric_crs": "EPSG:2056",
+      "dropped_edges": 0,
+      "retrieved_at": "2026-08-20T09:25:27+00:00",
+      "fallback_reason": null
+    },
+    "bike": {
+      "network": "bike",
+      "mode": "live",
+      "source": "OpenStreetMap / OSMnx",
+      "nodes": 5918,
+      "edges": 8034,
+      "total_length_km": 584.0,
+      "crs": "EPSG:4326",
+      "metric_crs": "EPSG:2056",
+      "dropped_edges": 0,
+      "retrieved_at": "2026-08-20T10:21:04+00:00",
+      "fallback_reason": null
+    }
+  },
+  "network": {
+    "network": "walk",
+    "mode": "live",
+    "source": "OpenStreetMap / OSMnx",
+    "nodes": 14102,
+    "edges": 19258,
+    "total_length_km": 884.1,
+    "crs": "EPSG:4326",
+    "metric_crs": "EPSG:2056",
+    "dropped_edges": 0,
+    "retrieved_at": "2026-08-20T09:25:27+00:00",
+    "fallback_reason": null
+  },
+  "entities": {
+    "mode": "live",
+    "source": "data.bs.ch",
+    "fallback_reason": null,
+    "counts": {
+      "areas": 21,
+      "schools": 415,
+      "accidents": 1500
+    }
+  },
+  "services": {
+    "mode": "live",
+    "generated_at": "2026-08-20T10:21:05+00:00",
+    "fallback_reason": null,
+    "total": 1308,
+    "networks": [
+      "walk",
+      "bike"
+    ],
+    "routable_by_network": {
+      "walk": 1289,
+      "bike": 1289
+    },
+    "categories": {
+      "school": {
+        "label": "Schools",
+        "count": 415,
+        "sources": [
+          "Open Government Data Basel-Stadt (data.bs.ch)"
+        ],
+        "datasets": [
+          "100029 — Schulstandorte"
+        ],
+        "missing_name": 0,
+        "missing_name_ratio": 0.0,
+        "routable": 415,
+        "poor_snaps": 7,
+        "failed_snaps": 0,
+        "snap_distance_m": {
+          "median": 32.7,
+          "p95": 79.7,
+          "max": 489.4
+        },
+        "duplicate_candidates": 34,
+        "duplicate_samples": [
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:00385cbc6a",
+              "service:school:bs:100029:53e4178e49"
+            ],
+            "names": [
+              "Kleinhüningen",
+              "Kleinhüningen"
+            ],
+            "distance_m": 7.6
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:650b19df1a",
+              "service:school:bs:100029:fc87cfbd7f"
+            ],
+            "names": [
+              "Iselin",
+              "Iselin"
+            ],
+            "distance_m": 0.9
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:9657ebbc8d",
+              "service:school:bs:100029:f86eb67a74"
+            ],
+            "names": [
+              "Drei Linden",
+              "Drei Linden"
+            ],
+            "distance_m": 0.3
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:075b3e0f14",
+              "service:school:bs:100029:ddc2171cfe"
+            ],
+            "names": [
+              "Horburg",
+              "Horburg"
+            ],
+            "distance_m": 8.0
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:251f461ab5",
+              "service:school:bs:100029:6836aececc"
+            ],
+            "names": [
+              "Bläsi",
+              "Bläsi"
+            ],
+            "distance_m": 2.8
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:f5da6896f4",
+              "service:school:bs:100029:eaf1c3ace2"
+            ],
+            "names": [
+              "Bläsi",
+              "Bläsi"
+            ],
+            "distance_m": 10.9
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:94fda81a95",
+              "service:school:bs:100029:46adfc2b4e"
+            ],
+            "names": [
+              "Rittergasse",
+              "Rittergasse"
+            ],
+            "distance_m": 16.2
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:5ffef5dbe7",
+              "service:school:bs:100029:c2bd02d7cd"
+            ],
+            "names": [
+              "Neubad",
+              "Neubad"
+            ],
+            "distance_m": 23.3
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:13c5204f02",
+              "service:school:bs:100029:256fc49862"
+            ],
+            "names": [
+              "Margarethen",
+              "Margarethen"
+            ],
+            "distance_m": 14.0
+          },
+          {
+            "category": "school",
+            "ids": [
+              "service:school:bs:100029:1c2856b9a9",
+              "service:school:bs:100029:dece1c8f87"
+            ],
+            "names": [
+              "Wasgenring",
+              "Wasgenring"
+            ],
+            "distance_m": 17.2
+          }
+        ],
+        "by_network": {
+          "walk": {
+            "routable": 415,
+            "poor_snaps": 7,
+            "failed_snaps": 0,
+            "median_snap_m": 32.7,
+            "max_snap_m": 489.4
+          },
+          "bike": {
+            "routable": 415,
+            "poor_snaps": 7,
+            "failed_snaps": 0,
+            "median_snap_m": 43.2,
+            "max_snap_m": 494.7
+          }
+        }
+      },
+      "grocery": {
+        "label": "Groceries",
+        "count": 166,
+        "sources": [
+          "OpenStreetMap"
+        ],
+        "datasets": [
+          "OSM shop=supermarket|convenience|greengrocer|grocery"
+        ],
+        "missing_name": 5,
+        "missing_name_ratio": 0.03,
+        "routable": 166,
+        "poor_snaps": 0,
+        "failed_snaps": 0,
+        "snap_distance_m": {
+          "median": 19.3,
+          "p95": 50.8,
+          "max": 82.7
+        },
+        "duplicate_candidates": 0,
+        "duplicate_samples": [],
+        "by_network": {
+          "walk": {
+            "routable": 166,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 19.3,
+            "max_snap_m": 82.7
+          },
+          "bike": {
+            "routable": 166,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 25.5,
+            "max_snap_m": 90.8
+          }
+        }
+      },
+      "pharmacy": {
+        "label": "Pharmacies",
+        "count": 63,
+        "sources": [
+          "OpenStreetMap"
+        ],
+        "datasets": [
+          "OSM amenity=pharmacy"
+        ],
+        "missing_name": 0,
+        "missing_name_ratio": 0.0,
+        "routable": 63,
+        "poor_snaps": 0,
+        "failed_snaps": 0,
+        "snap_distance_m": {
+          "median": 18.5,
+          "p95": 44.5,
+          "max": 68.3
+        },
+        "duplicate_candidates": 0,
+        "duplicate_samples": [],
+        "by_network": {
+          "walk": {
+            "routable": 63,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 18.5,
+            "max_snap_m": 68.3
+          },
+          "bike": {
+            "routable": 63,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 25.3,
+            "max_snap_m": 68.3
+          }
+        }
+      },
+      "healthcare": {
+        "label": "Healthcare",
+        "count": 111,
+        "sources": [
+          "Open Government Data Basel-Stadt (data.bs.ch)",
+          "OpenStreetMap"
+        ],
+        "datasets": [
+          "100015 — Basel Info: Interessante Orte (POI)",
+          "OSM amenity=doctors|clinic|hospital, healthcare=doctor|centre|general"
+        ],
+        "missing_name": 1,
+        "missing_name_ratio": 0.009,
+        "routable": 105,
+        "poor_snaps": 8,
+        "failed_snaps": 6,
+        "snap_distance_m": {
+          "median": 22.2,
+          "p95": 247.7,
+          "max": 358.9
+        },
+        "duplicate_candidates": 14,
+        "duplicate_samples": [
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:86",
+              "service:healthcare:osm:way:316830949"
+            ],
+            "names": [
+              "Klinik Sonnenhalde",
+              "Klinik Sonnenhalde"
+            ],
+            "distance_m": 3.3
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:97",
+              "service:healthcare:bs:100015:435"
+            ],
+            "names": [
+              "Kantonsspital Bruderholz",
+              "Kantonsspital Bruderholz"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:99",
+              "service:healthcare:bs:100015:114"
+            ],
+            "names": [
+              "UPK Universitäre Psychiatrische Kliniken Basel",
+              "UPK Universitäre Psychiatrische Kliniken Basel"
+            ],
+            "distance_m": 24.3
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:102",
+              "service:healthcare:osm:node:7317240625"
+            ],
+            "names": [
+              "Schmerzklinik Basel",
+              "Schmerzklinik Basel"
+            ],
+            "distance_m": 0.8
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:433",
+              "service:healthcare:bs:100015:89"
+            ],
+            "names": [
+              "Geburtshaus Tagmond",
+              "Geburtshaus Tagmond"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:434",
+              "service:healthcare:bs:100015:95"
+            ],
+            "names": [
+              "Hirslanden Klinik Birshof",
+              "Hirslanden Klinik Birshof"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:436",
+              "service:healthcare:bs:100015:101"
+            ],
+            "names": [
+              "Rennbahnklinik",
+              "Rennbahnklinik"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:438",
+              "service:healthcare:bs:100015:111"
+            ],
+            "names": [
+              "Hôpital de Saint-Louis",
+              "Hôpital de Saint-Louis"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:439",
+              "service:healthcare:bs:100015:113"
+            ],
+            "names": [
+              "Zentrum für psychische Gesundheit Binningen",
+              "Zentrum für psychische Gesundheit Binningen"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "healthcare",
+            "ids": [
+              "service:healthcare:bs:100015:93",
+              "service:healthcare:osm:way:189529423"
+            ],
+            "names": [
+              "Felix Platter-Spital",
+              "Felix-Platter-Spital"
+            ],
+            "distance_m": 9.0
+          }
+        ],
+        "by_network": {
+          "walk": {
+            "routable": 105,
+            "poor_snaps": 8,
+            "failed_snaps": 6,
+            "median_snap_m": 22.2,
+            "max_snap_m": 358.9
+          },
+          "bike": {
+            "routable": 105,
+            "poor_snaps": 8,
+            "failed_snaps": 6,
+            "median_snap_m": 34.3,
+            "max_snap_m": 5634.1
+          }
+        }
+      },
+      "park": {
+        "label": "Parks",
+        "count": 138,
+        "sources": [
+          "OpenStreetMap"
+        ],
+        "datasets": [
+          "OSM leisure=park, landuse=village_green|recreation_ground"
+        ],
+        "missing_name": 70,
+        "missing_name_ratio": 0.507,
+        "routable": 138,
+        "poor_snaps": 0,
+        "failed_snaps": 0,
+        "snap_distance_m": {
+          "median": 3.9,
+          "p95": 17.4,
+          "max": 29.3
+        },
+        "duplicate_candidates": 1,
+        "duplicate_samples": [
+          {
+            "category": "park",
+            "ids": [
+              "service:park:osm:way:164212624",
+              "service:park:osm:way:1200056832"
+            ],
+            "names": [
+              "Erlenmattpark",
+              null
+            ],
+            "distance_m": 19.1
+          }
+        ],
+        "by_network": {
+          "walk": {
+            "routable": 138,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 3.9,
+            "max_snap_m": 29.3
+          },
+          "bike": {
+            "routable": 138,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 9.3,
+            "max_snap_m": 121.9
+          }
+        }
+      },
+      "sport": {
+        "label": "Sport",
+        "count": 310,
+        "sources": [
+          "Open Government Data Basel-Stadt (data.bs.ch)"
+        ],
+        "datasets": [
+          "100151 — Sport- und Bewegungsanlagen"
+        ],
+        "missing_name": 0,
+        "missing_name_ratio": 0.0,
+        "routable": 307,
+        "poor_snaps": 13,
+        "failed_snaps": 3,
+        "snap_distance_m": {
+          "median": 28.2,
+          "p95": 113.9,
+          "max": 450.2
+        },
+        "duplicate_candidates": 20,
+        "duplicate_samples": [
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:172",
+              "service:sport:bs:100151:120"
+            ],
+            "names": [
+              "Sekundarschule Vogesen",
+              "Sekundarschule Vogesen"
+            ],
+            "distance_m": 9.7
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:172",
+              "service:sport:bs:100151:150"
+            ],
+            "names": [
+              "Sekundarschule Vogesen",
+              "Sekundarschule Vogesen"
+            ],
+            "distance_m": 15.2
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:120",
+              "service:sport:bs:100151:150"
+            ],
+            "names": [
+              "Sekundarschule Vogesen",
+              "Sekundarschule Vogesen"
+            ],
+            "distance_m": 5.5
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:159",
+              "service:sport:bs:100151:52"
+            ],
+            "names": [
+              "Rittergasse",
+              "Rittergasse"
+            ],
+            "distance_m": 10.0
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:314",
+              "service:sport:bs:100151:148"
+            ],
+            "names": [
+              "Hirzbrunnen-Schulhaus",
+              "Hirzbrunnen-Schulhaus"
+            ],
+            "distance_m": 3.1
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:107",
+              "service:sport:bs:100151:201"
+            ],
+            "names": [
+              "Sportplatz Landauer",
+              "Sportplatz Landauer"
+            ],
+            "distance_m": 0.0
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:264",
+              "service:sport:bs:100151:265"
+            ],
+            "names": [
+              "Naturbad Riehen",
+              "Naturbad Riehen"
+            ],
+            "distance_m": 12.6
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:242",
+              "service:sport:bs:100151:245"
+            ],
+            "names": [
+              "Burgstrassen-Schulhaus",
+              "Burgstrassen-Schulhaus"
+            ],
+            "distance_m": 24.1
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:242",
+              "service:sport:bs:100151:244"
+            ],
+            "names": [
+              "Burgstrassen-Schulhaus",
+              "Burgstrassen-Schulhaus"
+            ],
+            "distance_m": 22.3
+          },
+          {
+            "category": "sport",
+            "ids": [
+              "service:sport:bs:100151:257",
+              "service:sport:bs:100151:259"
+            ],
+            "names": [
+              "Hinter Gärten-Schulhaus",
+              "Hinter Gärten-Schulhaus"
+            ],
+            "distance_m": 5.3
+          }
+        ],
+        "by_network": {
+          "walk": {
+            "routable": 307,
+            "poor_snaps": 13,
+            "failed_snaps": 3,
+            "median_snap_m": 28.2,
+            "max_snap_m": 450.2
+          },
+          "bike": {
+            "routable": 307,
+            "poor_snaps": 13,
+            "failed_snaps": 3,
+            "median_snap_m": 43.4,
+            "max_snap_m": 610.1
+          }
+        }
+      },
+      "library": {
+        "label": "Libraries",
+        "count": 33,
+        "sources": [
+          "OpenStreetMap"
+        ],
+        "datasets": [
+          "OSM amenity=library"
+        ],
+        "missing_name": 0,
+        "missing_name_ratio": 0.0,
+        "routable": 33,
+        "poor_snaps": 0,
+        "failed_snaps": 0,
+        "snap_distance_m": {
+          "median": 23.1,
+          "p95": 56.7,
+          "max": 72.7
+        },
+        "duplicate_candidates": 0,
+        "duplicate_samples": [],
+        "by_network": {
+          "walk": {
+            "routable": 33,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 23.1,
+            "max_snap_m": 72.7
+          },
+          "bike": {
+            "routable": 33,
+            "poor_snaps": 0,
+            "failed_snaps": 0,
+            "median_snap_m": 27.2,
+            "max_snap_m": 82.7
+          }
+        }
+      },
+      "culture": {
+        "label": "Culture",
+        "count": 72,
+        "sources": [
+          "Open Government Data Basel-Stadt (data.bs.ch)"
+        ],
+        "datasets": [
+          "100015 — Basel Info: Interessante Orte (POI)"
+        ],
+        "missing_name": 0,
+        "missing_name_ratio": 0.0,
+        "routable": 62,
+        "poor_snaps": 5,
+        "failed_snaps": 10,
+        "snap_distance_m": {
+          "median": 23.4,
+          "p95": 222.5,
+          "max": 441.4
+        },
+        "duplicate_candidates": 0,
+        "duplicate_samples": [],
+        "by_network": {
+          "walk": {
+            "routable": 62,
+            "poor_snaps": 5,
+            "failed_snaps": 10,
+            "median_snap_m": 23.4,
+            "max_snap_m": 441.4
+          },
+          "bike": {
+            "routable": 62,
+            "poor_snaps": 5,
+            "failed_snaps": 10,
+            "median_snap_m": 39.1,
+            "max_snap_m": 5498.0
+          }
+        }
+      }
+    }
+  },
+  "transit": {
+    "mode": "live",
+    "source": "opentransportdata.swiss",
+    "feed": "Swiss national timetable (GTFS 2020)",
+    "feed_version": "20260819",
+    "retrieved_at": "2026-08-20T10:19:04+00:00",
+    "extraction": "stops within lat 47.42–47.68, lon 7.4–7.9 (Basel and its cross-border surroundings)",
+    "fallback_reason": null,
+    "stops": 1437,
+    "routes": 246,
+    "trips": 200696,
+    "patterns": 1997,
+    "service_dates": {
+      "first": 20251214,
+      "last": 20261212
+    },
+    "serves_today": true,
+    "malformed_records": 0,
+    "stop_snap_failures": 1154,
+    "poor_stop_snaps": 43,
+    "median_stop_snap_m": 4304.6,
+    "max_stop_snap_m": 22381.8,
+    "min_transfer_seconds": 90
+  }
+}

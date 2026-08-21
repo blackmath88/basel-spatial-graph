@@ -29,7 +29,7 @@ Reference application — the 15-Minute Basel map
 Spatial Graph Core — the same data, relationally queryable
   P1    Heterogeneous Basel graph        ✅
   P2    Structured query API             ✅ (grouping + aggregation)
-  P2.5  Provenance foundation            🟡
+  P2.5  Provenance foundation            ✅
   P3    MCP adapter                      ✅
   P4    Natural-language planning        next / later
 ```
@@ -67,13 +67,21 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-python -m app.prepare_data          # downloads and caches everything (~4 min, once)
-                                    # …and builds the spatial graph at the end
-
 uvicorn app.main:app --reload
 ```
 
 Then open <http://127.0.0.1:8000> (API docs at <http://127.0.0.1:8000/docs>).
+
+**No preparation step, no downloads.** The repository ships `data/processed/` as a
+**frozen snapshot of real Basel data** — 24.8 MB of prepared artefacts, ~8 MB in the clone —
+so every capability below works on the first start: the map, walking, cycling, walk + transit,
+the Spatial Graph Core, the standing questions and the MCP tools. The server reads those files
+at startup (~1.8 s) and never opens a socket.
+
+The snapshot is **real, and it is not current**. It is a photograph of Basel taken on the date
+in `data/processed/SNAPSHOT.json`, not a live feed. `python -m app.prepare_data` re-downloads
+everything and is the only way to move it forward — see
+[The frozen snapshot](#the-frozen-snapshot).
 
 The optional agent interface needs Python 3.10+ because FastMCP does. Keep it
 isolated from the Python 3.9-compatible reference app:
@@ -87,7 +95,10 @@ python -m app.mcp.server
 
 See [docs/MCP.md](docs/MCP.md) for tools and client configuration.
 
-`python -m app.prepare_data` prints exactly what it got:
+### Refreshing the data
+
+You never need this to run the project — only to move the snapshot forward.
+`python -m app.prepare_data` downloads everything again (~4 min) and prints exactly what it got:
 
 ```text
 Preparing Basel Spatial Graph...
@@ -153,17 +164,43 @@ Stop → walking network attachments
 
 Data-quality report: data/processed/data_quality.json (18 warning(s))
 
+Snapshot
+
+  manifest: data/processed/SNAPSHOT.json (frozen 2026-08-21T14:04:48+00:00)
+  entities         1.7 MB  matches
+  walk             8.3 MB  differs
+  bike             3.7 MB  differs
+  services         1.0 MB  differs
+  transit          5.9 MB  matches
+  spatial_graph    4.1 MB  differs
+  data_quality     0.0 MB  differs
+  population       0.0 MB  matches
+
+  Some artefacts differ from the committed snapshot; the server will report them as `local`.
+  To publish them as the new frozen snapshot: python -m app.snapshot --write
+
 ----------------------------------------------------------
 status  streets:  LIVE
 status  bike:     LIVE
 status  entities: LIVE
 status  services: LIVE
 status  transit:  LIVE
+status  snapshot: local (differs from the committed snapshot)
 status  overall:  READY
 ----------------------------------------------------------
 ```
 
 It exits `0` when everything is live and `1` when anything fell back to fixture data.
+
+Preparing data does **not** re-freeze the snapshot. Freshly downloaded files would otherwise
+relabel themselves as "the frozen snapshot" and the distinction would be worthless, so the
+server reports them as `local` until you deliberately re-freeze and commit:
+
+```bash
+python -m app.snapshot            # what on disk still matches the committed snapshot?
+python -m app.snapshot --write    # re-describe data/processed/ as the new frozen snapshot
+git add data/processed && git commit -m "Refresh the Basel snapshot"
+```
 
 ## What you can do
 
@@ -234,25 +271,62 @@ community-maintained and published under ODbL; attribution travels in every API 
 Basel entities and several service categories come from the official
 [Open Government Data Basel-Stadt](https://data.bs.ch/) portal.
 
-## What gets cached
+## The frozen snapshot
 
-| File | Contents | Written by |
+`data/processed/` is committed. That is what makes `git clone && uvicorn app.main:app` work.
+
+| File | Contents | Real? | Needed at startup for | MB |
+|---|---|---|---|---:|
+| `basel_walking_network.graphml` | OSM pedestrian graph: 14,102 nodes / 19,258 edges / 884 km, `length_m`, geometry, `highway`, `name`, OSM ids | real (OSM) | walking, transit walk legs, all snapping, the map | 8.3 |
+| `basel_transit.npz` | The Basel timetable subset: 1,437 stops, 246 routes, 200,696 trips | real (opentransportdata.swiss) | walk + transit | 5.9 |
+| `basel_spatial_graph.json` | The heterogeneous typed graph: 4,034 nodes, 14,092 edges | derived | Spatial Graph Core, standing questions, MCP | 4.1 |
+| `basel_cycling_network.graphml` | OSM bicycle graph: 5,918 nodes / 584 km | real (OSM) | cycling | 3.7 |
+| `basel_entities.json` | Normalized areas / schools / accidents | real (data.bs.ch) | the entity graph, the map, `/analysis/*` | 1.7 |
+| `basel_services.json` | 1,308 services, each with a walk **and** a bike access node, snap distance and quality | real (data.bs.ch + OSM) | every accessibility answer, `/services` | 1.0 |
+| `basel_population.json` | Neighbourhood population by age group, 10 years, data.bs.ch `100128` | official | *build time only* — rebuilding the graph offline | 0.03 |
+| `data_quality.json` | Generated counts, missing names, bad snaps, duplicates, warnings | derived | `/data/status`, provenance caveats | 0.02 |
+| `SNAPSHOT.json` | The manifest: size, SHA-256 and generation / retrieval / reference date per artefact | — | telling frozen from local | 0.01 |
+
+24.8 MB on disk, roughly 8 MB in a clone. Everything above is **normalized, prepared output**.
+
+What is *not* committed, and never will be:
+
+| Not committed | Why | Size |
 |---|---|---|
-| `data/processed/basel_walking_network.graphml` | Walking graph: nodes with lon/lat, edges with `length_m`, geometry, `highway`, `name`, OSM ids | `prepare_data` |
-| `data/processed/basel_cycling_network.graphml` | The bicycle-accessible graph, same shape | `prepare_data` |
-| `data/processed/basel_transit.npz` | The Basel timetable subset: 1,437 stops, 246 routes, 200,696 trips (6 MB) | `prepare_data` |
-| `data/raw/gtfs/gtfs_ch.zip` | The 224 MB Swiss GTFS archive, kept so a re-extract need not re-download | `prepare_data` |
-| `data/processed/basel_services.json` | 1,308 normalized services **with a walk and a bike access node, snap distance and quality each** | `prepare_data` |
-| `data/processed/basel_entities.json` | Normalized areas / schools / accidents | `prepare_data` |
-| `data/processed/basel_population.json` | Neighbourhood population by age group, 10 years, from data.bs.ch `100128` | `prepare_data` |
-| `data/processed/basel_spatial_graph.json` | The heterogeneous typed graph: 4,034 nodes, 14,092 edges (4.3 MB) | `prepare_spatial_graph` |
-| `data/processed/data_quality.json` | Generated counts, missing names, bad snaps, duplicates, warnings | `prepare_data` |
-| `data/raw/osmnx_cache/` | OSMnx's raw Overpass responses, so a `--refresh` is cheap | OSMnx |
-| `data/raw/*.json` | Raw Basel Open Data responses, for inspection | `prepare_data` |
+| `data/raw/gtfs/gtfs_ch.zip` | The Swiss GTFS archive is an input to extraction, not a runtime dependency | 224 MB |
+| `data/raw/osmnx_cache/` | OSMnx's raw Overpass responses; only makes a `--refresh` cheaper | 24 MB |
+| `data/raw/*.json` | Raw Basel Open Data responses, kept locally for inspection | 2.8 MB |
 
-**The server never downloads anything.** `uvicorn` reads these caches at startup (~1.8 s) and then
-answers queries from memory. Restarting or `--reload` does not re-download the OSM graphs, re-extract
-the 2.9 GB of GTFS, or re-snap anything.
+No Git LFS, no remote storage, no download at startup: the artefacts are small enough to be
+ordinary files in an ordinary repository.
+
+### It is real data, and it is not current
+
+Every figure in the snapshot came from the real source it names. None of it is refreshed by
+running the server. `SNAPSHOT.json` carries the dates so nothing has to be guessed:
+
+```bash
+python -m app.snapshot        # per-artefact: matches / differs / missing
+curl 'http://127.0.0.1:8000/health' | jq .snapshot
+```
+
+```json
+{
+  "state": "frozen",
+  "label": "frozen snapshot",
+  "is_frozen_snapshot": true,
+  "note": "A frozen snapshot of real Basel data, prepared once and committed so the server runs
+           straight after `git clone` with no downloads. It is real, and it is not current…",
+  "created_at": "2026-08-21T14:04:48+00:00",
+  "valid_until": "2026-12-12",
+  "refresh_command": "python -m app.prepare_data"
+}
+```
+
+`valid_until` is the **last service date in the frozen timetable**. Past it, transit answers stop
+being meaningful until the snapshot is refreshed; walking, cycling, the graph and the questions are
+unaffected. The OSM networks and the POI catalogue drift more slowly and more quietly — a shop that
+closed last month is still in the snapshot, and looks exactly like a shop that is open.
 
 ## Refreshing, and forcing fixture mode
 
@@ -262,8 +336,11 @@ python -m app.prepare_data --network-only     # just the two street networks
 python -m app.prepare_data --services-only    # just the service POIs
 python -m app.prepare_data --entities-only    # just the Basel entity datasets
 python -m app.prepare_data --transit-only     # just the timetable
-python -m app.prepare_data --population-only # just the demographic data
-python -m app.prepare_spatial_graph          # just the heterogeneous graph (~1.3 s)
+python -m app.prepare_data --population-only  # just the demographic data
+python -m app.prepare_spatial_graph           # just the heterogeneous graph (~1.3 s)
+
+python -m app.snapshot                        # does the disk still match the committed snapshot?
+python -m app.snapshot --write                # re-freeze data/processed/ as the new snapshot
 
 BASEL_GRAPH_FIXTURE=1 uvicorn app.main:app --reload       # synthetic everything, fully offline
 BASEL_SERVICE_SOURCE=fixture uvicorn app.main:app         # synthetic services, real streets
@@ -275,18 +352,43 @@ BASEL_TRANSIT_SOURCE=gtfs uvicorn app.main:app            # refuse to start with
 Tunable defaults: `BASEL_WALKING_SPEED_KMH`, `BASEL_CYCLING_SPEED_KMH`, `BASEL_MAX_TRANSFERS`,
 `BASEL_MIN_TRANSFER_SECONDS`, `BASEL_STOP_TRANSFER_RADIUS_M`.
 
+`python -m app.prepare_spatial_graph` rebuilds the heterogeneous graph from the committed
+snapshot alone, so it works offline in a fresh clone — that is why `basel_population.json` is
+committed even though the server never reads it.
+
 Service snapping is stored with a fingerprint of the network it was made against. Re-prepare the
 network alone and the next start re-snaps in memory rather than trusting stale node ids —
 `/health` reports it as `services.resnapped_at_startup`.
 
-## How to tell LIVE from FIXTURE
+Preparing data leaves `data/processed/` dirty in `git status`. That is deliberate: replacing the
+snapshot the repository ships is a reviewable commit, not a side effect of running a script.
+`git checkout -- data/processed` puts the frozen snapshot back.
 
-- four header badges — green `streets / bike / transit / services: live`, orange when fixture;
+## How to tell frozen from local from fixture
+
+Three data states, never conflated:
+
+| State | Meaning |
+|---|---|
+| `frozen` | Byte-identical to the committed snapshot — you are running exactly what the repository ships. Real Basel data, not current. |
+| `local` | You ran `python -m app.prepare_data`; this artefact is newer than the committed snapshot. |
+| `fixture` | The subsystem fell back to synthetic data. Deterministic and offline, but **not Basel** — no figure derived from it describes the real city. |
+
+The state is resolved at startup by hashing each artefact against `SNAPSHOT.json` (~20 ms for
+all of them) and surfaced everywhere an answer can be read:
+
+- five header badges — `streets / bike / transit / services` and the snapshot itself, blue when
+  frozen, green when locally prepared, orange when fixture;
 - the *Data sources & quality* panel, with per-category counts and every warning;
-- `GET /health`, `GET /data/status`, and `provenance.mode` in every accessibility response.
+- `GET /health` — a `snapshot` block plus a `data_state` on every subsystem;
+- `GET /data/status` — the same `snapshot` block alongside the quality report;
+- `GET /spatial-graph/status` — `data_state` for the graph;
+- `provenance.data_state` in every structured query answer, standing question and MCP result,
+  next to `provenance.mode` and the per-dataset `retrieved_at`.
 
-When a source is unavailable the app still starts, says why (`fallback_reason`), and never labels
-synthetic data as real.
+A subsystem's own verdict always wins: a server that fell back to the fixture reports `fixture`
+whatever is lying on disk. When a source is unavailable the app still starts, says why
+(`fallback_reason`), and never labels synthetic data as real.
 
 ## How walking time becomes distance
 
@@ -492,12 +594,19 @@ cut short by the Rhine, the rail corridor and the motorway. Each category's near
 pytest
 ```
 
-360+ tests, all deterministic and fully offline — the suite blocks socket connections outright and
+385 tests, all deterministic and fully offline — the suite blocks socket connections outright and
 routes over tiny hand-built graphs and a four-stop synthetic timetable, so it never depends on
-OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
+OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable, and never on the committed
+snapshot either.
 
 ## Known limitations
 
+- **The committed data are frozen, not live.** Real Basel data from the dates in
+  `data/processed/SNAPSHOT.json`, and nothing refreshes them but
+  `python -m app.prepare_data`. The frozen timetable's last service date is `valid_until`
+  in the manifest; past it, transit answers stop being meaningful while walking, cycling and
+  the graph carry on unaffected. A shop that closed after the snapshot was taken is still in
+  it, and looks exactly like a shop that is open.
 - **The spatial graph works at neighbourhood scale.** Every accessibility figure
   stands for a whole Wohnviertel from one representative origin, and nothing is
   population-weighted because the population data is not finer than that.
@@ -531,7 +640,10 @@ OpenStreetMap, data.bs.ch or opentransportdata.swiss being reachable.
 - **Origins and services snap to the nearest node**, not the nearest point along an edge; every snap
   distance and quality grade is reported.
 - **The basemap and MapLibre load from the internet** (CARTO/OSM raster tiles), so the map needs a
-  connection even though the API does not.
+  connection even though the API does not. Every API endpoint, the CLI, the MCP server and the
+  whole test suite are fully offline.
+- **Refreshing needs the network and about four minutes**, including a 224 MB GTFS download. There
+  is no incremental update: `prepare_data` re-fetches whichever subsystem you ask for in full.
 
 ## Documentation
 

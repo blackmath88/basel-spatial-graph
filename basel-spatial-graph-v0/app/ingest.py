@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -133,6 +134,8 @@ def fetch_entities(save_raw: bool = True) -> dict:
 
 def write_entity_cache(data: dict, path=None):
     path = Path(path or ENTITY_CACHE)
+    # Stamped so the snapshot manifest can state when these records were fetched.
+    data.setdefault("generated_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return path

@@ -1,5 +1,24 @@
 # Data and provenance
 
+## What the repository ships — the frozen snapshot
+
+Everything described below is committed to the repository under `data/processed/`, so the server
+runs immediately after `git clone` with no downloads. The committed artefacts are **real data,
+frozen at one moment** — the manifest `data/processed/SNAPSHOT.json` records each artefact's size,
+SHA-256 and whatever generation, retrieval or reference date it carries, and `valid_until` records
+the last service date in the frozen timetable.
+
+At startup every artefact is hashed against that manifest, and each subsystem reports one of three
+data states: `frozen` (identical to the committed snapshot), `local` (prepared since by
+`python -m app.prepare_data`) or `fixture` (synthetic fallback — not Basel). The state travels in
+`/health`, `/data/status`, `/spatial-graph/status` and `provenance.data_state`. The raw download
+caches — the 224 MB GTFS archive, the OSMnx Overpass cache, the raw API responses — are **not**
+committed; they are inputs to preparation, never runtime dependencies.
+
+`python -m app.snapshot` compares disk with the manifest; `--write` re-freezes it. Preparing data
+never re-freezes on its own, so freshly downloaded files cannot quietly relabel themselves as the
+shipped snapshot.
+
 ## Walking network — LIVE
 
 | | |
