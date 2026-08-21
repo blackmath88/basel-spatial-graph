@@ -1,7 +1,8 @@
 """The generated data-quality report."""
 import json
 
-from app.data_quality import build_report, concise, read_report, write_report
+from app.data_quality import (build_report, compact_snapshot, concise, read_report,
+                              relevant_caveats, write_report)
 from app.service_index import ServiceIndex, snap_services
 from app.service_model import ServiceCategory, ServiceLocation
 from app.fixtures import fixture_records
@@ -102,6 +103,27 @@ def test_concise_form_without_a_report_tells_you_what_to_run():
     summary = concise(None)
     assert summary["available"] is False
     assert "prepare_data" in summary["hint"]
+
+
+def test_quality_selector_is_scoped_and_structured(streets):
+    services = [_service("p", category=ServiceCategory.PHARMACY, lon=7.7, lat=47.62),
+                _service("g", category=ServiceCategory.GROCERY, lon=7.7, lat=47.62)]
+    snap_services(streets, services)
+    index = ServiceIndex(services, mode="fixture",
+                         source_errors={"grocery": ["irrelevant failure"]})
+    snapshot = compact_snapshot(build_report(streets, None, index))
+    selected = relevant_caveats(snapshot, categories=["pharmacy"], networks=["walk"])
+    codes = {row["code"] for row in selected["caveats"]}
+    assert "service_snap_failures" in codes
+    assert "network_not_live" in codes
+    assert "service_source_failure" not in codes
+    assert all(row["scope"].get("category") != "grocery"
+               for row in selected["caveats"])
+
+
+def test_quality_selector_has_explicit_unavailable_state():
+    assert relevant_caveats(None, categories=["pharmacy"]) == {
+        "available": False, "caveats": []}
 
 
 def test_data_status_endpoint():

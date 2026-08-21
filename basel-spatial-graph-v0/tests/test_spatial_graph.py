@@ -561,6 +561,65 @@ def test_q6_children_underserved(service):
         assert row["children"] > thresholds["children_more_than"]
         assert row["pharmacy_count"] < thresholds["pharmacy_count_below"]
     assert "official Basel-Stadt statistics" in answer["methodology"]
+    provenance = answer["provenance"]
+    fields = provenance["fields"]
+    children = fields["results[].children"]
+    assert children["classification"] == "official"
+    population = provenance["sources"][children["source_refs"][0]]
+    assert population["reference_year"] == 2025
+    assert population["age_group_definitions"]["children"] == "aged 0-17 (minors)"
+    assert population["data_mode"] == "fixture"
+
+    for field in ("results[].pharmacy_count", "results[].pharmacy_nearest_minutes"):
+        computation = provenance["computations"][fields[field]["computation_ref"]]
+        assert computation["classification"] == "dynamic"
+        assert computation["algorithm"] == "NetworkX single-source Dijkstra"
+        assert computation["edge_weight"] == "length_m"
+        assert computation["speed_kmh"] > 0
+        assert computation["time_budget_minutes"] == answer["minutes"]
+        assert computation["source_refs"]
+
+    transit_field = fields["results[].transit_stops_in_walking_range"]
+    assert transit_field["classification"] == "dynamic"
+    assert "RAPTOR" in provenance["computations"][transit_field["computation_ref"]]["algorithm"]
+    for name, operator in (("children_median", "gt"),
+                           ("pharmacy_count_below", "lt"),
+                           ("transit_stops_below", "lt")):
+        derivation = provenance["computations"][
+            fields[f"thresholds.{name}"]["computation_ref"]]
+        assert derivation["method"] == "median"
+        assert derivation["input_count"] == answer["total_neighborhoods"]
+        assert derivation["null_semantics"] == "null values ignored"
+        assert derivation["comparison_operator"] == operator
+    codes = {row["code"] for row in provenance["quality"]["caveats"]}
+    assert {"network_not_live", "services_not_live", "transit_not_live"} <= codes
+    assert all(row.get("applies_to") for row in provenance["quality"]["caveats"])
+
+
+def test_q6_structural_transit_fallback_is_explicit():
+    from app.modes import TravelMode
+    from app.spatial_graph.fixtures import fixture_service
+
+    fallback = fixture_service()
+    fallback.analysis.engines.pop(TravelMode.TRANSIT)
+    answer = fallback.ask("q6_children_underserved")
+    field = answer["provenance"]["fields"]["results[].transit_stops_in_walking_range"]
+    assert field["classification"] == "derived"
+    assert field["relation"] == "HAS_TRANSIT_STOP"
+    assert field["method"] == "point-in-polygon"
+    assert "not stops reachable" in field["semantics"]
+    assert "not stops reachable" in answer["methodology"]
+    assert not any(row["code"].startswith("transit_")
+                   for row in answer["provenance"]["quality"]["caveats"])
+
+
+def test_missing_quality_metadata_does_not_break_q6():
+    from app.spatial_graph.fixtures import fixture_service
+
+    without_quality = fixture_service()
+    without_quality.graph.metadata["data_quality"] = {"available": False}
+    quality = without_quality.ask("q6_children_underserved")["provenance"]["quality"]
+    assert quality == {"available": False, "caveats": []}
 
 
 def test_every_question_returns_a_methodology(service):

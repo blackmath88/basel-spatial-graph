@@ -41,6 +41,11 @@ def test_find_reachable_uses_fixture_engine_without_geometry(tools):
     result = tools.find_reachable("area:a", "pharmacy", "walk", 15)
     assert result["category"] == "pharmacy"
     assert result["provenance"]["classification"] == "dynamic"
+    computation = result["provenance"]["computations"]["accessibility"]
+    assert computation["algorithm"] == "NetworkX single-source Dijkstra"
+    assert computation["speed_kmh"] > 0
+    assert computation["network"]["fixture"] is True
+    assert computation["source_refs"]
     assert "geometry" not in str(result).lower()
 
 
@@ -55,6 +60,9 @@ def test_compare_areas_and_modes_is_bounded(tools):
     assert result["count"] == 4
     assert result["execution"]["bounded"] is True
     assert {row["mode"] for row in result["results"]} == {"walk", "bike"}
+    assert set(result["provenance"]["computations"]) == {"walk", "bike"}
+    assert all(row["algorithm"] == "NetworkX single-source Dijkstra"
+               for row in result["provenance"]["computations"].values())
 
 
 def test_entity_and_relation_provenance(tools):

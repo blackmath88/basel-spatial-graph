@@ -60,6 +60,10 @@ class AccessibilityAnalysis:
         profile = self._profile(node["id"], lat, lon, travel_mode, float(minutes),
                                 departure_time, int(max_transfers))
         row = profile["by_category"].get(wanted.value) if wanted else None
+        provenance = dict(profile["provenance"])
+        provenance["origin_method"] = self.origin_method
+        provenance["service_sources"] = self.service_sources(
+            travel_mode, wanted.value if wanted else None)
         return {
             "kind": RESULT_KIND,
             "mode": travel_mode.value,
@@ -75,7 +79,27 @@ class AccessibilityAnalysis:
             "departure_time": profile.get("departure_time"),
             "service_date": profile.get("service_date"),
             "stops_in_walking_range": profile.get("stops_in_walking_range"),
+            "provenance": provenance,
         }
+
+    def service_sources(self, mode, category: Optional[str] = None) -> list:
+        """Distinct observed POI datasets used by one analysis."""
+        travel_mode = parse_mode(mode) if isinstance(mode, str) else mode
+        engine = self.engines.get(travel_mode)
+        services = getattr(getattr(engine, "services", None), "services", [])
+        seen, rows = set(), []
+        for service in services:
+            if category and service.category.value != category:
+                continue
+            provenance = service.provenance
+            key = (provenance.get("source"), provenance.get("dataset"),
+                   provenance.get("source_url"), provenance.get("license"))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({key: provenance.get(key) for key in
+                         ("source", "dataset", "source_url", "license", "retrieved_at")})
+        return rows
 
     def profile(self, node: dict, mode: str = "walk", minutes: float = 15,
                 departure_time: Optional[str] = None, max_transfers: int = 1) -> dict:
@@ -124,13 +148,11 @@ class AccessibilityAnalysis:
             "departure_time": result.get("departure_time"),
             "service_date": result.get("service_date"),
             "stops_in_walking_range": (result.get("transit") or {}).get("stops_in_walking_range"),
-            "provenance": {
-                "routing_method": result["provenance"].get("routing_method"),
-                "algorithm": result["provenance"].get("algorithm"),
-                "network_source": result["provenance"].get("network_source"),
-                "speed_kmh": result["provenance"].get("speed_kmh"),
-                "max_transfers": result["provenance"].get("max_transfers"),
-            },
+            # Keep the engine's semantic metadata intact. Its generated_at is
+            # deliberately excluded so cached and uncached results describe
+            # the same computation.
+            "provenance": {key: value for key, value in result["provenance"].items()
+                           if key != "generated_at"},
         }
         self._cache[key] = profile
         return profile

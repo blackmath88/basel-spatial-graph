@@ -12,6 +12,8 @@ from ..errors import BaselGraphError, QuerySpecError
 from ..modes import parse_mode
 from ..service_model import parse_category
 from ..spatial_graph import SpatialGraphService
+from ..spatial_graph.provenance import shared_provenance
+from ..data_quality import relevant_caveats
 
 
 class SpatialGraphMCPTools:
@@ -69,14 +71,26 @@ class SpatialGraphMCPTools:
                 "nearest_name": result["nearest_name"],
                 "departure_time": result.get("departure_time"),
                 "service_date": result.get("service_date"),
-                "provenance": {
+                "provenance": {**shared_provenance(
+                    self.service.graph, types=["Neighborhood"],
+                    analyses=[{"classification": "dynamic", "computed_by":
+                               "app.accessibility / app.multimodal"}],
+                    computations=[{"id": "accessibility", **result["provenance"]}],
+                    fields={
+                        "count": {"classification": "dynamic",
+                                  "computation_ref": "accessibility"},
+                        "nearest_minutes": {"classification": "dynamic",
+                                            "computation_ref": "accessibility"},
+                    },
+                    quality=relevant_caveats(
+                        self.service.graph.metadata.get("data_quality"),
+                        categories=[category], networks=["walk" if mode == "transit" else mode],
+                        transit=mode == "transit")),
                     "classification": "dynamic",
                     "computed_by": "app.accessibility / app.multimodal",
                     "parameters": {"mode": mode, "minutes": float(minutes),
-                                   "category": category,
-                                   "departure_time": departure_time,
-                                   "max_transfers": max_transfers},
-                },
+                                   "category": category, "departure_time": departure_time,
+                                   "max_transfers": max_transfers}},
             }
         except BaselGraphError as error:
             return self._error(error)
@@ -95,12 +109,14 @@ class SpatialGraphMCPTools:
                 parse_mode(mode)
             parse_category(category)
             rows = []
+            computations = {}
             for entity_id in neighborhood_ids:
                 node = self._neighborhood(entity_id)
                 for mode in wanted_modes:
                     result = self.service.analysis.accessibility(
                         node, mode=mode, minutes=minutes, category=category,
                         departure_time=departure_time)
+                    computations.setdefault(mode, {"id": mode, **result["provenance"]})
                     rows.append({
                         "neighborhood_id": entity_id, "neighborhood": node.get("name"),
                         "mode": mode, "category": category, "minutes": float(minutes),
@@ -112,10 +128,25 @@ class SpatialGraphMCPTools:
                 "results": rows, "count": len(rows),
                 "execution": {"areas": len(neighborhood_ids), "modes": wanted_modes,
                               "analysis_calls": len(rows), "bounded": True},
-                "provenance": {"classification": "dynamic",
-                               "computed_by": "app.accessibility / app.multimodal",
-                               "parameters": {"category": category, "minutes": float(minutes),
-                                              "departure_time": departure_time}},
+                "provenance": {**shared_provenance(
+                    self.service.graph, types=["Neighborhood"],
+                    analyses=[{"classification": "dynamic", "computed_by":
+                               "app.accessibility / app.multimodal"}],
+                    computations=list(computations.values()),
+                    fields={
+                        "results[].count": {"classification": "dynamic",
+                                            "computation_refs": list(computations)},
+                        "results[].nearest_minutes": {"classification": "dynamic",
+                                                      "computation_refs": list(computations)},
+                    },
+                    quality=relevant_caveats(
+                        self.service.graph.metadata.get("data_quality"), categories=[category],
+                        networks=["walk" if mode == "transit" else mode for mode in wanted_modes],
+                        transit="transit" in wanted_modes)),
+                    "classification": "dynamic",
+                    "computed_by": "app.accessibility / app.multimodal",
+                    "parameters": {"category": category, "minutes": float(minutes),
+                                   "departure_time": departure_time}},
             }
         except BaselGraphError as error:
             return self._error(error)

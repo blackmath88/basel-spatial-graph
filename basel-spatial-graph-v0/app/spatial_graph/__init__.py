@@ -18,7 +18,9 @@ from ..errors import SpatialGraphUnavailableError
 from .analysis import AccessibilityAnalysis
 from .builder import ORIGIN_METHOD, build_spatial_graph
 from .model import MAX_RESULTS, NetworkXSpatialGraph, SpatialGraphStore, public_node
-from .provenance import entity_provenance, query_provenance, relation_provenance
+from .provenance import (entity_provenance, query_provenance, relation_provenance,
+                         shared_provenance)
+from ..data_quality import relevant_caveats
 from .query import QueryEngine, QuerySpec
 from .questions import QUESTIONS
 from .schema import (
@@ -180,10 +182,12 @@ class SpatialGraphService:
         before = self.analysis.stats()
         result = self.engine.run(spec)
         after = self.analysis.stats()
+        computations = result["execution"].pop("computation_provenance", [])
         result["provenance"] = query_provenance(self.graph, spec, {
             "engine_calls": after["engine_calls"] - before["engine_calls"],
             "cache_hits": after["cache_hits"] - before["cache_hits"],
             "modes": after["modes"],
+            "computations": computations,
         })
         return result
 
@@ -196,21 +200,44 @@ class SpatialGraphService:
         before = self.analysis.stats()
         answer = QUESTIONS[name](self.graph, self.analysis, **params)
         after = self.analysis.stats()
-        answer["provenance"] = {
-            "graph_generated_at": self.graph.metadata.get("generated_at"),
-            "graph_mode": self.graph.metadata.get("mode"),
-            "origin_method": self.graph.metadata.get("origin_method"),
-            "population_reference_year": self.graph.metadata.get("population_reference_year"),
-            "sources": self.graph.metadata.get("sources"),
-            "analysis_engine": {
+        descriptor = answer.pop("_provenance", {})
+        quality_spec = descriptor.get("quality") or {}
+        quality = relevant_caveats(
+            self.graph.metadata.get("data_quality"),
+            categories=quality_spec.get("categories", ()),
+            networks=quality_spec.get("networks", ()),
+            transit=quality_spec.get("transit", False))
+        if descriptor.get("fields"):
+            for caveat in quality.get("caveats", []):
+                code = caveat["code"]
+                if code.startswith("service_") or code.startswith("services_"):
+                    caveat["applies_to"] = ["results[].pharmacy_count",
+                                             "results[].pharmacy_nearest_minutes"]
+                elif code.startswith("transit_"):
+                    caveat["applies_to"] = ["results[].transit_stops_in_walking_range"]
+                elif code.startswith("network_"):
+                    caveat["applies_to"] = ["results[].pharmacy_count",
+                                             "results[].pharmacy_nearest_minutes"]
+                    if quality_spec.get("transit"):
+                        caveat["applies_to"].append(
+                            "results[].transit_stops_in_walking_range")
+        relations = [relation_provenance(item) for item in descriptor.get("relations", [])]
+        computations = descriptor.get("computations", [])
+        answer["provenance"] = shared_provenance(
+            self.graph, types=descriptor.get("types", ["Neighborhood"]),
+            relations=relations,
+            analyses=[{"classification": "dynamic", "computed_by":
+                       "app.accessibility / app.multimodal"}],
+            computations=computations, fields=descriptor.get("fields"), quality=quality,
+            analysis_stats={
                 "engine_calls": after["engine_calls"] - before["engine_calls"],
                 "cache_hits": after["cache_hits"] - before["cache_hits"],
-            },
-            "result_kinds": {
-                "persisted_graph_relations": ["ADJACENT_TO", "HAS_SERVICE", "HAS_TRANSIT_STOP",
-                                              "HAS_POPULATION_OBSERVATION"],
-                "dynamic_analytical_computation": ["accessibility counts", "nearest times"],
-            },
+            })
+        # Compatibility key retained while the field registry is authoritative.
+        answer["provenance"]["result_kinds"] = {
+            "persisted_graph_relations": ["ADJACENT_TO", "HAS_SERVICE", "HAS_TRANSIT_STOP",
+                                          "HAS_POPULATION_OBSERVATION"],
+            "dynamic_analytical_computation": ["accessibility counts", "nearest times"],
         }
         return answer
 

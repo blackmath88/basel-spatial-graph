@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from .schema import RELATION_TYPES
+from ..data_quality import relevant_caveats
 
 CLASSIFICATIONS = {
     "observed": "Recorded by a data provider (a POI, a stop, a timetable entry).",
@@ -121,6 +122,107 @@ def datasets_used(graph, types: List[str]) -> List[dict]:
     return rows
 
 
+def _source_record(classification: str, provenance: dict, **extra) -> dict:
+    return {
+        "classification": classification,
+        "data_mode": provenance.get("mode"),
+        "source": provenance.get("source"),
+        "dataset": provenance.get("dataset") or provenance.get("feed"),
+        "dataset_title": provenance.get("dataset_title"),
+        "source_url": provenance.get("source_url"),
+        "license": provenance.get("license"),
+        "retrieved_at": provenance.get("retrieved_at"),
+        **extra,
+    }
+
+
+def source_registry(graph, computations=None) -> dict:
+    """Compact, stable source records shared by field derivations."""
+    metadata = graph.metadata or {}
+    raw = metadata.get("sources") or {}
+    population = raw.get("population") or {}
+    sources = {}
+    if population:
+        sources["population"] = _source_record(
+            "official", population,
+            reference_year=metadata.get("population_reference_year"),
+            age_group_definitions=population.get("age_group_definitions"),
+        )
+        if metadata.get("mode") == "fixture":
+            sources["population"]["data_mode"] = "fixture"
+
+    for computation in computations or []:
+        network = computation.get("network") or {}
+        mode = computation.get("network_kind") or computation.get("travel_mode")
+        if network:
+            key = f"{mode or 'routing'}_network"
+            sources[key] = _source_record("observed", network)
+        transit = computation.get("transit") or {}
+        if transit:
+            sources["transit_feed"] = _source_record("observed", transit)
+        for index, item in enumerate(computation.get("service_sources") or []):
+            key = "service_" + str(index + 1)
+            while key in sources and sources[key].get("dataset") != item.get("dataset"):
+                index += 1
+                key = "service_" + str(index + 1)
+            sources[key] = _source_record("observed", item)
+            if metadata.get("mode") == "fixture" and sources[key].get("data_mode") is None:
+                sources[key]["data_mode"] = "fixture"
+    return sources
+
+
+def _computation_registry(computations, sources) -> dict:
+    result = {}
+    for index, raw in enumerate(computations or []):
+        item = dict(raw)
+        key = item.pop("id", None) or item.pop("name", None) or f"analysis_{index + 1}"
+        refs = []
+        network_kind = item.get("network_kind") or item.get("travel_mode")
+        if item.get("network") and f"{network_kind}_network" in sources:
+            refs.append(f"{network_kind}_network")
+        if item.get("transit") and "transit_feed" in sources:
+            refs.append("transit_feed")
+        for source_key, source in sources.items():
+            if not source_key.startswith("service_"):
+                continue
+            if any(source.get("dataset") == row.get("dataset") and
+                   source.get("source") == row.get("source")
+                   for row in item.get("service_sources") or []):
+                refs.append(source_key)
+        item.pop("service_sources", None)
+        if item.get("classification") != "derived":
+            item["classification"] = "dynamic"
+        item["source_refs"] = refs
+        result[key] = item
+    return result
+
+
+def shared_provenance(graph, *, types=None, relations=None, analyses=None,
+                      computations=None, fields=None, quality=None,
+                      analysis_stats=None) -> dict:
+    """One assembler for structured queries and standing questions."""
+    metadata = graph.metadata or {}
+    computations = computations or []
+    sources = source_registry(graph, computations)
+    return {
+        "version": "1.1",
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "graph_generated_at": metadata.get("generated_at"),
+        "graph_mode": metadata.get("mode"),
+        "origin_method": metadata.get("origin_method") if analyses else None,
+        "population_reference_year": metadata.get("population_reference_year"),
+        "datasets": datasets_used(graph, types or []),
+        "relations_traversed": relations or [],
+        "analyses": analyses or [],
+        "classification_key": CLASSIFICATIONS,
+        "analysis_engine": analysis_stats,
+        "sources": sources,
+        "computations": _computation_registry(computations, sources),
+        "fields": fields or {},
+        "quality": quality or {"available": False, "caveats": []},
+    }
+
+
 def query_provenance(graph, spec, analysis_stats: Optional[dict] = None) -> dict:
     """The provenance block attached to every relational query answer."""
     types = [spec.start_type] + [
@@ -137,19 +239,26 @@ def query_provenance(graph, spec, analysis_stats: Optional[dict] = None) -> dict
         }
         for step in spec.analyses
     ]
-    metadata = graph.metadata or {}
-    result = {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "graph_generated_at": metadata.get("generated_at"),
-        "graph_mode": metadata.get("mode"),
-        "datasets": datasets_used(graph, types),
-        "relations_traversed": relations,
-        "analyses": analyses,
-        "origin_method": metadata.get("origin_method") if analyses else None,
-        "population_reference_year": metadata.get("population_reference_year"),
-        "classification_key": CLASSIFICATIONS,
-        "analysis_engine": analysis_stats,
-    }
+    actual = (analysis_stats or {}).pop("computations", [])
+    fields = {}
+    for path in spec.return_fields or []:
+        for step in spec.analyses:
+            if path.startswith(step.name + "."):
+                fields[f"results[].{path}"] = {
+                    "classification": "dynamic", "computation_ref": step.name}
+        leaf = path.rsplit(".", 1)[-1]
+        if spec.start_type == "Neighborhood" and leaf in DENORMALIZED_FROM["Neighborhood"][0][1]:
+            fields[f"results[].{path}"] = {
+                "classification": "official", "source_refs": ["population"]}
+    quality = relevant_caveats((graph.metadata or {}).get("data_quality"),
+                               categories=[s.params.get("category") for s in spec.analyses
+                                           if s.params.get("category")],
+                               networks=[s.params.get("mode", "walk") for s in spec.analyses],
+                               transit=any(s.params.get("mode") == "transit" for s in spec.analyses))
+    result = shared_provenance(
+        graph, types=types, relations=relations, analyses=analyses,
+        computations=actual, fields=fields, quality=quality,
+        analysis_stats=analysis_stats)
     if spec.group_aggregates:
         result["aggregation"] = {
             "classification": "derived",

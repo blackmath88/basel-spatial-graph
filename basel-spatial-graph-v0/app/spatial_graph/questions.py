@@ -268,15 +268,29 @@ def children_underserved(graph, analysis, min_children: Optional[int] = None,
     round number someone picked.
     """
     rows = []
+    walk_provenance = None
+    transit_provenance = None
+    transit_path = "dynamic" if "transit" in analysis.available_modes else "structural"
+    fallback_method = "point-in-polygon"
     for node in _neighborhoods(graph):
         walk = analysis.profile(node, mode=mode, minutes=minutes,
                                 departure_time=departure_time)
         transit = analysis.profile(node, mode="transit", minutes=minutes,
                                    departure_time=departure_time) \
             if "transit" in analysis.available_modes else {}
+        if walk_provenance is None:
+            walk_provenance = dict(walk.get("provenance") or {})
+            walk_provenance["origin_method"] = analysis.origin_method
+            walk_provenance["service_sources"] = analysis.service_sources(mode, "pharmacy")
+        if transit and transit_provenance is None:
+            transit_provenance = dict(transit.get("provenance") or {})
+            transit_provenance["origin_method"] = analysis.origin_method
         stops = transit.get("stops_in_walking_range")
         if stops is None:
-            stops = len(graph.neighbors(node["id"], relation="HAS_TRANSIT_STOP"))
+            neighbors = graph.neighbors(node["id"], relation="HAS_TRANSIT_STOP")
+            stops = len(neighbors)
+            if neighbors:
+                fallback_method = neighbors[0].get("properties", {}).get("method") or fallback_method
         rows.append(_row(
             node,
             child_share=node.get("child_share"),
@@ -296,6 +310,66 @@ def children_underserved(graph, analysis, min_children: Optional[int] = None,
         and r["transit_stops_in_walking_range"] < stop_median
     ]
     matched.sort(key=lambda r: -(r["children"] or 0))
+    threshold_fields = {
+        "children_median": ("children", "gt", False),
+        "pharmacy_count_below": ("pharmacy_count", "lt", False),
+        "transit_stops_below": ("transit_stops_in_walking_range", "lt", False),
+    }
+    computations = [{"id": "pharmacy_access", **(walk_provenance or {})}]
+    if transit_path == "dynamic":
+        computations.append({"id": "transit_stop_access", **(transit_provenance or {})})
+    fields = {
+        "results[].children": {"classification": "official", "source_refs": ["population"]},
+        "results[].pharmacy_count": {
+            "classification": "dynamic", "computation_ref": "pharmacy_access"},
+        "results[].pharmacy_nearest_minutes": {
+            "classification": "dynamic", "computation_ref": "pharmacy_access", "unit": "minutes"},
+    }
+    if transit_path == "dynamic":
+        fields["results[].transit_stops_in_walking_range"] = {
+            "classification": "dynamic", "computation_ref": "transit_stop_access",
+            "semantics": "stops reachable on foot within the routed time budget"}
+        transit_methodology = (
+            "Transit access is the number of stops reachable on foot inside the same budget, "
+            "from the multimodal engine's first phase.")
+    else:
+        fields["results[].transit_stops_in_walking_range"] = {
+            "classification": "derived", "relation": "HAS_TRANSIT_STOP",
+            "method": fallback_method,
+            "semantics": ("fallback count of stops physically contained in the neighborhood; "
+                          "not stops reachable within the walking-time budget")}
+        transit_methodology = (
+            "Transit routing was unavailable, so the compatibility field uses persisted "
+            "HAS_TRANSIT_STOP containment counts. These are stops physically inside each "
+            "neighbourhood, not stops reachable within the walking-time budget.")
+    threshold_values = {
+        "children_median": child_median,
+        "pharmacy_count_below": pharmacy_median,
+        "transit_stops_below": stop_median,
+    }
+    for name, (input_field, operator, overridden) in threshold_fields.items():
+        computation_id = f"threshold_{name}"
+        computations.append({
+            "id": computation_id, "classification": "derived", "method": "median",
+            "input_field": input_field, "input_set": "all_neighborhoods",
+            "input_count": sum(row.get(input_field) is not None for row in rows),
+            "null_semantics": "null values ignored",
+            "comparison_operator": operator, "caller_override": overridden,
+            "value": threshold_values[name],
+        })
+        fields[f"thresholds.{name}"] = {
+            "classification": "derived", "computation_ref": computation_id}
+    computations.append({
+        "id": "threshold_children_more_than", "classification": "derived",
+        "method": "caller value" if min_children is not None else "median",
+        "input_field": "children", "input_set": "all_neighborhoods",
+        "input_count": sum(row.get("children") is not None for row in rows),
+        "null_semantics": "null values ignored", "comparison_operator": "gt",
+        "caller_override": min_children is not None, "value": threshold,
+        "median_value": child_median,
+    })
+    fields["thresholds.children_more_than"] = {
+        "classification": "derived", "computation_ref": "threshold_children_more_than"}
     return _stamp(
         question=("Which neighbourhoods with many children have below-median access to both "
                   "pharmacies and public transport?"),
@@ -309,12 +383,17 @@ def children_underserved(graph, analysis, min_children: Optional[int] = None,
         },
         results=matched[:limit], total_neighborhoods=len(rows),
         all_neighborhoods=rows,
+        _provenance={
+            "types": ["Neighborhood"], "computations": computations, "fields": fields,
+            "quality": {"categories": ["pharmacy"], "networks": ["walk"],
+                        "transit": transit_path == "dynamic"},
+            "relations": (["HAS_TRANSIT_STOP"] if transit_path == "structural" else []),
+        },
         methodology=(
             "Child population is official Basel-Stadt statistics (dataset 100128, ages 0-17) "
             "carried on the Neighborhood node. Pharmacy access is a live walking accessibility "
-            "run from the neighbourhood's representative origin. Transit access is the number of "
-            "stops reachable on foot inside the same budget, from the multimodal engine's first "
-            "phase. All three thresholds are medians of the observed distribution and are "
+            f"run from the neighbourhood's representative origin using {mode} mode. "
+            f"{transit_methodology} All three thresholds are medians of the observed distribution and are "
             "returned so the rule can be checked or changed."),
     )
 

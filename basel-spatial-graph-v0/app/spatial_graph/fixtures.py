@@ -18,6 +18,7 @@ from ..service_sources import fixture_services
 from ..street_sources import fixture_street_network
 from ..transit_index import TransitIndex
 from ..transit_sources import fixture_timetable
+from ..data_quality import build_report, compact_snapshot
 from .builder import build_spatial_graph
 
 
@@ -29,7 +30,9 @@ def fixture_graph():
         snap_services(streets, services, network=name)
     index = ServiceIndex(services, mode="fixture", networks=("walk", "bike"))
     transit = TransitIndex(fixture_timetable(), mode="fixture").attach_to_network(networks["walk"])
-    graph = build_spatial_graph(fixture_records(), index, transit, fixture_population(), networks)
+    quality = compact_snapshot(build_report(networks, fixture_records(), index, transit))
+    graph = build_spatial_graph(fixture_records(), index, transit, fixture_population(), networks,
+                                data_quality=quality)
     return graph, networks, index, transit
 
 

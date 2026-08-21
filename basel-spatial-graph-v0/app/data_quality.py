@@ -20,6 +20,101 @@ from .service_sources import duplicate_candidates
 MAX_DUPLICATE_SAMPLES = 10
 
 
+def compact_snapshot(report: Optional[dict]) -> dict:
+    """Persist only quality facts that can qualify query results."""
+    if not report:
+        return {"available": False}
+    services = report.get("services") or {}
+    return {
+        "available": True,
+        "generated_at": report.get("generated_at"),
+        "networks": {
+            name: {key: block.get(key) for key in
+                   ("mode", "source", "dropped_edges", "fallback_reason")}
+            for name, block in (report.get("networks") or {}).items()
+        },
+        "services": {
+            "mode": services.get("mode"),
+            "fallback_reason": services.get("fallback_reason"),
+            "source_errors": services.get("source_errors") or {},
+            "categories": {
+                name: {key: row.get(key) for key in
+                       ("poor_snaps", "failed_snaps", "duplicate_candidates")}
+                for name, row in (services.get("categories") or {}).items()
+            },
+        },
+        "transit": {key: (report.get("transit") or {}).get(key) for key in (
+            "mode", "fallback_reason", "stop_snap_failures", "poor_stop_snaps",
+            "malformed_records", "serves_today")},
+    }
+
+
+def relevant_caveats(snapshot: Optional[dict], *, categories=(), networks=(),
+                     transit: bool = False) -> dict:
+    """Select deterministic, structured caveats for fields used by an answer."""
+    if not snapshot or not snapshot.get("available"):
+        return {"available": False, "caveats": []}
+    caveats = []
+
+    def add(code, scope, message, **details):
+        caveats.append({"code": code, "scope": scope, "message": message, **details})
+
+    for name in sorted(set(networks)):
+        block = (snapshot.get("networks") or {}).get(name) or {}
+        if block.get("mode") and block.get("mode") != "live":
+            add("network_not_live", {"network": name},
+                f"The {name} network is {block['mode']} data.", mode=block["mode"])
+        if block.get("fallback_reason"):
+            add("network_fallback", {"network": name},
+                "The prepared network used a fallback.", reason=block["fallback_reason"])
+        if block.get("dropped_edges"):
+            add("network_dropped_edges", {"network": name},
+                "Network edges without usable lengths were dropped.",
+                count=block["dropped_edges"])
+
+    services = snapshot.get("services") or {}
+    if categories and services.get("mode") and services.get("mode") != "live":
+        add("services_not_live", {"categories": sorted(set(categories))},
+            f"Service locations are {services['mode']} data.", mode=services["mode"])
+    if categories and services.get("fallback_reason"):
+        add("services_fallback", {"categories": sorted(set(categories))},
+            "The prepared service catalogue used a fallback.",
+            reason=services["fallback_reason"])
+    for category in sorted(set(categories)):
+        row = (services.get("categories") or {}).get(category) or {}
+        for key, code in (("failed_snaps", "service_snap_failures"),
+                          ("poor_snaps", "service_poor_snaps"),
+                          ("duplicate_candidates", "service_duplicate_candidates")):
+            if row.get(key):
+                add(code, {"category": category},
+                    f"The prepared {category} data has {row[key]} {key.replace('_', ' ')}.",
+                    count=row[key])
+        for error in (services.get("source_errors") or {}).get(category, []):
+            add("service_source_failure", {"category": category},
+                "A service source failed during preparation.", detail=error)
+
+    if transit:
+        block = snapshot.get("transit") or {}
+        if block.get("mode") and block.get("mode") != "live":
+            add("transit_not_live", {"domain": "transit"},
+                f"The transit timetable is {block['mode']} data.", mode=block["mode"])
+        if block.get("fallback_reason"):
+            add("transit_fallback", {"domain": "transit"},
+                "The prepared timetable used a fallback.", reason=block["fallback_reason"])
+        for key, code in (("stop_snap_failures", "transit_stop_snap_failures"),
+                          ("poor_stop_snaps", "transit_stop_poor_snaps"),
+                          ("malformed_records", "transit_malformed_records")):
+            if block.get(key):
+                add(code, {"domain": "transit"},
+                    f"Transit preparation reported {block[key]} {key.replace('_', ' ')}.",
+                    count=block[key])
+        if block.get("serves_today") is False:
+            add("transit_calendar_out_of_date", {"domain": "transit"},
+                "The timetable does not cover today's date.")
+    return {"available": True, "generated_at": snapshot.get("generated_at"),
+            "caveats": caveats}
+
+
 def build_report(networks=None, entities: Optional[dict] = None, service_index=None,
                  transit=None) -> dict:
     report = {
@@ -161,6 +256,7 @@ def _service_report(index, warnings) -> dict:
         "mode": index.mode,
         "generated_at": index.generated_at,
         "fallback_reason": index.fallback_reason,
+        "source_errors": index.source_errors or {},
         "total": len(index.services),
         "networks": list(networks),
         "routable_by_network": {

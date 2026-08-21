@@ -19,6 +19,7 @@ from .service_sources import load_services
 from .spatial_graph.builder import build_spatial_graph
 from .street_sources import load_network
 from .transit_sources import load_transit
+from .data_quality import compact_snapshot, read_report
 
 
 def _rel(path) -> str:
@@ -50,7 +51,9 @@ def prepare(fixture: bool = False, path=None, verbose: bool = True):
         print(f"  input  {label:<18} {marker}" + (f"  ({reason})" if reason else ""))
     print()
 
-    graph = build_spatial_graph(entities, services, transit, population, networks, progress=say)
+    graph = build_spatial_graph(
+        entities, services, transit, population, networks, progress=say,
+        data_quality=compact_snapshot(read_report()))
 
     print("\n  node types")
     for name, count in graph.node_counts().items():

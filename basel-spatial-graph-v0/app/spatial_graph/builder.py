@@ -46,13 +46,14 @@ class SpatialGraphBuilder:
 
     def __init__(self, entities: Optional[dict] = None, services=None,
                  transit=None, population: Optional[dict] = None,
-                 networks: Optional[dict] = None, progress=None):
+                 networks: Optional[dict] = None, progress=None, data_quality=None):
         self.entities = entities or {}
         self.services = services
         self.transit = transit
         self.population = population or {}
         self.networks = networks or {}
         self.progress = progress or (lambda message: None)
+        self.data_quality = data_quality or {"available": False}
         self.graph = NetworkXSpatialGraph()
         self._areas: List[dict] = []
         self._shapes: List = []
@@ -386,6 +387,7 @@ class SpatialGraphBuilder:
             "origin_method": ORIGIN_METHOD,
             "warnings": list(self.warnings),
             "sources": sources,
+            "data_quality": self.data_quality,
         }
 
     def _is_fixture(self) -> bool:
@@ -396,6 +398,6 @@ class SpatialGraphBuilder:
 
 
 def build_spatial_graph(entities=None, services=None, transit=None, population=None,
-                        networks=None, progress=None) -> NetworkXSpatialGraph:
+                        networks=None, progress=None, data_quality=None) -> NetworkXSpatialGraph:
     return SpatialGraphBuilder(entities, services, transit, population, networks,
-                               progress).build()
+                               progress, data_quality).build()

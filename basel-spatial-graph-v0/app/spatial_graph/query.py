@@ -478,12 +478,13 @@ class QueryEngine:
 
         rows: List[dict] = []
         analyses_run = 0
+        computation_provenance: Dict[str, dict] = {}
         for node in candidates:
             context: Dict[str, Any] = {spec.start_type: node, "id": node.get("id"),
                                        "_start_type": spec.start_type}
             if not self._apply_traversals(spec, context):
                 continue
-            ok, ran = self._apply_analyses(spec, node, context)
+            ok, ran = self._apply_analyses(spec, node, context, computation_provenance)
             analyses_run += ran
             if not ok:
                 continue
@@ -527,6 +528,7 @@ class QueryEngine:
                 "include_geometry": spec.include_geometry,
                 "elapsed_seconds": round(elapsed, 3),
                 "generated_at": started.isoformat(timespec="seconds"),
+                "computation_provenance": list(computation_provenance.values()),
             },
             "query": spec.describe(),
         }
@@ -568,7 +570,8 @@ class QueryEngine:
                 return False
         return True
 
-    def _apply_analyses(self, spec: QuerySpec, node: dict, context: dict):
+    def _apply_analyses(self, spec: QuerySpec, node: dict, context: dict,
+                        computation_provenance: dict):
         ran = 0
         for step in spec.analyses:
             if self.analysis_runner is None:
@@ -577,6 +580,11 @@ class QueryEngine:
             result = self.analysis_runner(node, step.kind, step.params)
             ran += 1
             context[step.name] = result
+            if result.get("provenance"):
+                computation_provenance.setdefault(step.name, {
+                    "name": step.name, "type": step.kind,
+                    "parameters": step.params, **result["provenance"],
+                })
             if step.constraint:
                 value = _resolve(f"{step.name}.{step.constraint['field']}", context)
                 if not _compare(value, step.constraint["op"], step.constraint.get("value")):
