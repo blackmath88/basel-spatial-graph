@@ -1,4 +1,6 @@
-# Runtime (serving the API and the map)
+# Runtime: serving the API, the map, the CLI and the MCP tools.
+# This is all the tested quick-start path needs — the repository ships the
+# prepared data, so nothing here downloads or rebuilds anything.
 fastapi>=0.115
 uvicorn[standard]>=0.30
 httpx>=0.27
@@ -7,10 +9,6 @@ numpy>=1.24
 shapely>=2.0
 pyproj>=3.4
 pydantic>=2.8
-
-# Data preparation only (`python -m app.prepare_data`).
-# Pulls in geopandas/pandas; the running server never imports it.
-osmnx>=2.0
 
 # Tests
 pytest>=8.0

@@ -1,0 +1,4 @@
+# Refreshing the data only (`python -m app.prepare_data`).
+# OSMnx pulls in geopandas and pandas; the running server never imports it,
+# so it is kept out of requirements.txt to keep the quick-start install small.
+osmnx>=2.0

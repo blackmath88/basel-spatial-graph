@@ -1,8 +1,45 @@
-# 15-Minute Basel
+# Basel Spatial Graph
 
-Click anywhere in Basel, pick a travel mode and a time budget, and see **what everyday life you can
-actually reach** — routed along the real OpenStreetMap pedestrian and bicycle networks and the
-official Swiss timetable, never drawn as a circle.
+Heterogeneous public city data — OpenStreetMap street networks, cantonal open
+government datasets, official population statistics and the Swiss GTFS timetable —
+joined once into a **typed relational graph of Basel**, queryable through a structured API and
+an MCP adapter, where **every answer carries its own provenance**.
+
+> The join is precomputed and correct, and the answer carries its own provenance.
+
+Four sources that normally live in four incompatible shapes — polygons, POI rows, a routing
+graph, a timetable — are normalized, snapped and related ahead of time. Traversal, filtering,
+grouping and aggregation run over typed relations. Anything that depends on a travel mode, a
+budget or a departure time is computed *at request time* by deterministic routing engines, never
+stored and never averaged away, and is labelled a live computation rather than a stored fact.
+
+```bash
+python -m app.spatial_graph.cli ask q6_children_underserved --table
+```
+
+```text
+Which neighbourhoods with many children have below-median access to both
+pharmacies and public transport?
+
+  name          children   child_share   pharmacies   nearest   transit stops
+  St. Alban         2237         17.5%            1    12.0 min             5
+  Bruderholz        1994         20.5%            1     4.7 min            11
+  Hirzbrunnen       1914         19.1%            2     8.7 min            14
+```
+
+Three kinds of statement in one answer, kept apart rather than blended: `children` is **official**
+statistics (data.bs.ch `100128`, reference year 2025), `transit stops` is a **derived** structural
+relation persisted in the graph, and `pharmacies` / `nearest` are **dynamic** — a real Dijkstra run
+for these parameters, which would differ for others. The response says so, per field, with the
+dataset and retrieval date behind each. See [docs/SPATIAL_GRAPH.md](docs/SPATIAL_GRAPH.md) and
+[docs/QUERY_API.md](docs/QUERY_API.md).
+
+## The reference application — 15-Minute Basel
+
+The map is **one client of the core**, not the product. Click anywhere in Basel, pick a travel mode
+and a time budget, and see what everyday life you can actually reach — routed along the real
+OpenStreetMap pedestrian and bicycle networks and the official Swiss timetable, never drawn as a
+circle.
 
 ```text
 15 minutes from Barfüsserplatz
@@ -19,6 +56,9 @@ Sport                  23         218                 62
 categories reachable  6/6         6/6                6/6
 ```
 
+It exercises the same engines the graph calls, which is the point: one deterministic spatial core,
+several front doors — a map, an HTTP query API, a CLI and an MCP server.
+
 ```text
 Reference application — the 15-Minute Basel map
   V0    GIS graph                        ✅
@@ -30,31 +70,9 @@ Spatial Graph Core — the same data, relationally queryable
   P1    Heterogeneous Basel graph        ✅
   P2    Structured query API             ✅ (grouping + aggregation)
   P2.5  Provenance foundation            ✅
-  P3    MCP adapter                      ✅
+  P3    MCP adapter                      ✅ (local stdio)
   P4    Natural-language planning        next / later
 ```
-
-The map is now one client among several. There is a second way in: a typed
-heterogeneous graph of 4,034 Basel entities that answers cross-domain questions
-without rendering anything.
-
-```bash
-python -m app.spatial_graph.cli ask q6_children_underserved --table
-```
-
-```text
-Which neighbourhoods with many children have below-median access to both
-pharmacies and public transport?
-
-  name          children   child_share   pharmacies   nearest   transit stops
-  St. Alban         2237         17.5%            1    12.0 min             5
-  Bruderholz        1994         20.5%            1     4.7 min            11
-  Hirzbrunnen       1914         19.1%            2     8.7 min            14
-```
-
-Official population statistics, structural graph relations and a live routing
-computation, in one answer that states which part came from where. See
-[docs/SPATIAL_GRAPH.md](docs/SPATIAL_GRAPH.md).
 
 ## Quick start
 
@@ -70,6 +88,10 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+`requirements.txt` is the runtime and test set only. Refreshing the data additionally needs
+`pip install -r requirements-prepare.txt` (OSMnx, which pulls in geopandas and pandas) — the
+running server never imports it.
+
 Then open <http://127.0.0.1:8000> (API docs at <http://127.0.0.1:8000/docs>).
 
 **No preparation step, no downloads.** The repository ships `data/processed/` as a
@@ -78,10 +100,13 @@ so every capability below works on the first start: the map, walking, cycling, w
 the Spatial Graph Core, the standing questions and the MCP tools. The server reads those files
 at startup (~1.8 s) and never opens a socket.
 
-The snapshot is **real, and it is not current**. It is a photograph of Basel taken on the date
-in `data/processed/SNAPSHOT.json`, not a live feed. `python -m app.prepare_data` re-downloads
-everything and is the only way to move it forward — see
-[The frozen snapshot](#the-frozen-snapshot).
+The snapshot is **real, and it is not current**. It is a photograph of Basel taken on 2026-08-20,
+not a live feed. `python -m app.prepare_data` re-downloads everything and is the only way to move
+it forward — see [The frozen snapshot](#the-frozen-snapshot).
+
+Before drawing conclusions from any answer, read **[Known limitations](#known-limitations)**: what
+the frozen data can and cannot support, where snapping degrades quality, and what the model does
+not contain at all.
 
 The optional agent interface needs Python 3.10+ because FastMCP does. Keep it
 isolated from the Python 3.9-compatible reference app:
@@ -97,7 +122,8 @@ See [docs/MCP.md](docs/MCP.md) for tools and client configuration.
 
 ### Refreshing the data
 
-You never need this to run the project — only to move the snapshot forward.
+You never need this to run the project — only to move the snapshot forward. It needs the
+preparation dependencies (`pip install -r requirements-prepare.txt`) and a network connection.
 `python -m app.prepare_data` downloads everything again (~4 min) and prints exactly what it got:
 
 ```text
@@ -260,16 +286,30 @@ It is labelled **"Prototype accessibility completeness"** everywhere. It is not 
 quality score: no weighting by population, opening hours, capacity, size or quality. One kiosk counts
 the same as a supermarket.
 
-## What is OSMnx and where does the data come from?
+## Where the data comes from
 
-[OSMnx](https://osmnx.readthedocs.io/) downloads street networks and points of interest from
-[OpenStreetMap](https://www.openstreetmap.org/) as ready-to-use NetworkX/GeoPandas objects. We ask it
-for `network_type="walk"` over *Basel-Stadt, Switzerland*, which keeps footways, paths, pedestrian
-zones, steps, residential and living streets and drops motorways and other car-only ways. OSM is
-community-maintained and published under ODbL; attribution travels in every API response.
+Four independent providers, each keeping its own licence and attribution. Full detail, with dataset
+identifiers, URLs and retrieval dates, is in **[ATTRIBUTION.md](../ATTRIBUTION.md)**.
 
-Basel entities and several service categories come from the official
-[Open Government Data Basel-Stadt](https://data.bs.ch/) portal.
+| Provider | Contributes | Licence |
+|---|---|---|
+| [OpenStreetMap](https://www.openstreetmap.org/) via [OSMnx](https://osmnx.readthedocs.io/) | the pedestrian and bicycle networks; `grocery`, `pharmacy`, `park`, `library` and part of `healthcare` | ODbL 1.0, © OpenStreetMap contributors |
+| [Open Government Data Basel-Stadt](https://data.bs.ch/) | neighbourhoods `100042`, schools `100029`, accidents `100120`, sport `100151`, POI `100015`, population `100128` | Open Government Data Basel-Stadt (CC BY 3.0 CH) |
+| [opentransportdata.swiss](https://data.opentransportdata.swiss/dataset/timetable-2026-gtfs2020) | the Swiss national timetable (GTFS 2020), feed `20260819` | Open data, opentransportdata.swiss (attribution required) |
+| [CARTO](https://carto.com/attributions) + OpenStreetMap | the basemap raster tiles, loaded by the browser only | per provider, attributed in the map |
+
+OSMnx downloads street networks and points of interest from OpenStreetMap as ready-to-use
+NetworkX/GeoPandas objects. We ask it for `network_type="walk"` and `network_type="bike"` over
+*Basel-Stadt, Switzerland*, which keeps footways, paths, pedestrian zones, steps, residential and
+living streets and drops motorways and other car-only ways.
+
+Source data, derived artefacts, the frozen snapshot and request-time computations are four
+different kinds of statement, and the project never blends them — see
+[ATTRIBUTION.md](../ATTRIBUTION.md#four-different-kinds-of-statement) and
+[docs/DATA.md](docs/DATA.md).
+
+**Code licence: [MIT](../LICENSE).** It covers the source only; the committed data under
+`data/processed/` stays under the upstream licences above.
 
 ## The frozen snapshot
 
@@ -601,12 +641,24 @@ snapshot either.
 
 ## Known limitations
 
-- **The committed data are frozen, not live.** Real Basel data from the dates in
-  `data/processed/SNAPSHOT.json`, and nothing refreshes them but
-  `python -m app.prepare_data`. The frozen timetable's last service date is `valid_until`
-  in the manifest; past it, transit answers stop being meaningful while walking, cycling and
-  the graph carry on unaffected. A shop that closed after the snapshot was taken is still in
-  it, and looks exactly like a shop that is open.
+Read this section before drawing any conclusion about Basel from an answer. The quality figures
+below are those of the **committed snapshot**; `/data/status` reports whatever is actually loaded.
+
+### Data currency
+
+- **The committed data are frozen, not live.** Every artefact was retrieved on **2026-08-20**
+  (per-artefact `prepared_at` in `data/processed/SNAPSHOT.json`; the manifest itself was written
+  the following day). Nothing refreshes them but `python -m app.prepare_data`, and re-freezing the
+  snapshot is a separate, deliberate `python -m app.snapshot --write`.
+- **The shipped timetable expires.** Its last service date is **2026-12-12**, published as
+  `valid_until` in the manifest and in `/health`. Past that date transit answers stop describing
+  scheduled service. Walking, cycling, the entity graph and the population figures do **not**
+  become invalid on that date — but they do go quietly stale: a shop that closed after
+  2026-08-20 is still in the snapshot and looks exactly like a shop that is open.
+- **Population is annual, not current.** Reference years 2016–2025; the latest is a year-end
+  cantonal figure, not a live headcount.
+
+### Model and scope
 - **The spatial graph works at neighbourhood scale.** Every accessibility figure
   stands for a whole Wohnviertel from one representative origin, and nothing is
   population-weighted because the population data is not finer than that.
@@ -632,8 +684,18 @@ snapshot either.
   capacity and price are not modelled.
 - **Gap analysis measures street coverage, not people.** Coverage is computed at walking-network
   nodes; residential density is not taken into account. The methodology ships in the response.
-- **Duplicates are reported, not removed** — 34 school pairs share an address, and two pharmacies
-  really can share a building. See `/data/status`.
+- **No demand data anywhere.** No ridership, origin–destination flows, footfall, capacity or
+  opening hours. Every figure is supply-side: what exists and what can be reached, never how many
+  people actually go there or how busy it is when they do.
+- **One city, one snapshot.** The model is Basel-Stadt at one moment. There is no second city to
+  compare against and no time series of accessibility — only the population dimension has years.
+- **Snapping is the main derived-quality risk.** Origins, services and stops attach to the nearest
+  network node, not the nearest point along an edge. In the frozen snapshot that leaves 1,154 of
+  1,437 timetable stops unattachable to the pedestrian network, 19 services outside it entirely,
+  and 33 services snapped further than 150 m. Every snap distance and quality grade is reported
+  per record, and the snapshot's report raises 18 warnings in total — `/data/status` has them all.
+- **Duplicates are reported, not removed** — in the snapshot, 34 school pairs and 14 healthcare
+  pairs within 25 m; two pharmacies really can share a building. See `/data/status`.
 - **65 of 138 parks have no name.** The UI shows "Park (unnamed)"; the stored `name` stays `null`.
 - **Pedestrian rules are approximated.** Every retained way is walkable in both directions; no slope,
   stairs penalty, surface, barriers or construction.
@@ -642,8 +704,12 @@ snapshot either.
 - **The basemap and MapLibre load from the internet** (CARTO/OSM raster tiles), so the map needs a
   connection even though the API does not. Every API endpoint, the CLI, the MCP server and the
   whole test suite are fully offline.
-- **Refreshing needs the network and about four minutes**, including a 224 MB GTFS download. There
-  is no incremental update: `prepare_data` re-fetches whichever subsystem you ask for in full.
+- **Refreshing needs the network, the preparation dependencies and about four minutes**, including
+  a 224 MB GTFS download. There is no incremental update: `prepare_data` re-fetches whichever
+  subsystem you ask for in full.
+- **The MCP adapter is local stdio only.** No remote transport, no authentication, no hosted
+  endpoint; a client launches it as a subprocess. Geometry and route itineraries are not exposed
+  through it. See [docs/MCP.md](docs/MCP.md).
 
 ## Documentation
 
@@ -654,3 +720,9 @@ snapshot either.
 **Spatial Graph Core** — [Concept](docs/SPATIAL_GRAPH_MCP_CONCEPT.md) ·
 [The graph](docs/SPATIAL_GRAPH.md) · [Query API](docs/QUERY_API.md) · [MCP](docs/MCP.md) ·
 [City2Graph evaluation](docs/CITY2GRAPH.md)
+
+**Repository** — [Attribution and data licences](../ATTRIBUTION.md) · [Code licence (MIT)](../LICENSE)
+
+`docs/CONCEPT.md`, `docs/SPATIAL_GRAPH_MCP_CONCEPT.md` and `docs/CITY2GRAPH.md` are exploratory
+design documents kept for the reasoning they record — including options that were evaluated and
+rejected. They are marked as such and are not setup instructions.

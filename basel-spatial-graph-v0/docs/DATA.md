@@ -1,5 +1,7 @@
 # Data and provenance
 
+Source licences and per-dataset attribution: [../../ATTRIBUTION.md](../../ATTRIBUTION.md).
+
 ## What the repository ships — the frozen snapshot
 
 Everything described below is committed to the repository under `data/processed/`, so the server
@@ -7,6 +9,12 @@ runs immediately after `git clone` with no downloads. The committed artefacts ar
 frozen at one moment** — the manifest `data/processed/SNAPSHOT.json` records each artefact's size,
 SHA-256 and whatever generation, retrieval or reference date it carries, and `valid_until` records
 the last service date in the frozen timetable.
+
+Each section below is headed *real, frozen in the snapshot*: the source is genuine, and the copy
+committed here was retrieved on **2026-08-20** and does not change until it is refreshed. The
+application's own word for "real source rather than fixture" is `live` — that is what `mode: "live"`
+and the `LIVE` banner in `prepare_data` mean, and it says nothing about how recent the data is.
+The `data_state` below is what says that.
 
 At startup every artefact is hashed against that manifest, and each subsystem reports one of three
 data states: `frozen` (identical to the committed snapshot), `local` (prepared since by
@@ -19,7 +27,7 @@ committed; they are inputs to preparation, never runtime dependencies.
 never re-freezes on its own, so freshly downloaded files cannot quietly relabel themselves as the
 shipped snapshot.
 
-## Walking network — LIVE
+## Walking network — real, frozen in the snapshot
 
 | | |
 |---|---|
@@ -45,7 +53,7 @@ Basel-Stadt service datasets cover the whole canton, and a city-only network lef
 unroutable. The German and French suburbs are still outside it, and a click there returns a clear
 `outside_network` error rather than a snap across the border.
 
-## Entity sources — LIVE
+## Entity sources — real, frozen in the snapshot
 
 | Entity | Basel-Stadt dataset | Records | Role |
 |---|---:|---:|---|
@@ -64,7 +72,7 @@ but it would change if a school moved in the source data.
 
 Cached at `data/processed/basel_entities.json`; raw responses are kept in `data/raw/*.json` for inspection.
 
-## Cycling network — LIVE
+## Cycling network — real, frozen in the snapshot
 
 | | |
 |---|---|
@@ -75,7 +83,7 @@ Cached at `data/processed/basel_entities.json`; raw responses are kept in `data/
 A genuinely separate graph: the bicycle filter drops footways, steps and `bicycle=no` ways, so it
 has ~300 km *less* road than the pedestrian network. See [the cycling guide](CYCLING.md).
 
-## Public transport — LIVE
+## Public transport — real, frozen in the snapshot
 
 | | |
 |---|---|
@@ -91,7 +99,7 @@ Extracted in one streaming pass, never loaded whole. Platforms are collapsed int
 station. 283 of the 1,437 stations sit inside the pedestrian network and can therefore be boarded
 from or alighted at; the rest can be ridden through. See [the transit guide](TRANSIT.md).
 
-## Service locations — LIVE
+## Service locations — real, frozen in the snapshot
 
 1,308 everyday destinations across eight categories, from official Basel-Stadt datasets where they
 exist and OpenStreetMap where they do not:
@@ -117,18 +125,21 @@ See [the services guide](SERVICES.md) for the tag mappings, snapping rules and c
 `python -m app.prepare_data` also writes `data/processed/data_quality.json` and exposes a short form
 at `/data/status`. It records, per category: counts, which sources contributed, how many locations
 have no upstream name, how many snapped poorly or not at all, snap-distance median/p95/max, and
-possible duplicate pairs within 25 m. The current run raises 13 warnings — among them 19 services
-outside the walking network (regional museums in Germany, France and Baselland listed by the Basel
-Info dataset) and 34 school pairs at the same address.
+possible duplicate pairs within 25 m. The report committed with the frozen snapshot
+(generated 2026-08-20) raises **18 warnings** — among them 19 services outside the walking network
+(regional museums in Germany, France and Baselland listed by the Basel Info dataset), 34 possible
+duplicate school pairs within 25 m, and 1,154 of 1,437 timetable stops that could not be attached
+to the pedestrian network. `/data/status` always reports the loaded report rather than this
+number, so a refreshed snapshot corrects it automatically.
 
-## Neighbourhood population — LIVE
+## Neighbourhood population — real, frozen in the snapshot
 
 | | |
 |---|---|
 | Source | data.bs.ch `100128` — *Wohnbevölkerung nach Geschlecht, Alter, Staatsangehörigkeit und Wohnviertel* |
 | Licence | Open Government Data Basel-Stadt (CC BY 3.0 CH) |
 | Unit | Wohnviertel (all 21, including Riehen and Bettingen) |
-| Years | 2016–2025 prepared of 49 available (1974–2025) |
+| Years | 2016–2025 prepared of 49 available (1974–2025); latest reference year 2025 |
 | Size | 210 observations · canton total 210,529 in 2025 |
 | Cache | `data/processed/basel_population.json` |
 

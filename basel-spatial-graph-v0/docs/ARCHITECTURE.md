@@ -49,7 +49,7 @@ data.swiss         stream 2.9 GB, keep the Basel box                │
 ## The prepare / serve split
 
 `python -m app.prepare_data` is the only code path that talks to the internet. It downloads, normalizes,
-projects, snaps and caches. `uvicorn` reads the caches and nothing else, so startup is ~1.3 s and a
+projects, snaps and caches. `uvicorn` reads the caches and nothing else, so startup is ~1.8 s and a
 `--reload` costs nothing. The caches themselves are committed as a frozen snapshot (see
 [DATA.md](DATA.md)), which makes preparation a *refresh* mechanism rather than a prerequisite —
 without weakening the split, because the server still only ever reads prepared files. This is what makes the graph affordable: 14k nodes, 19k edges and 1,308

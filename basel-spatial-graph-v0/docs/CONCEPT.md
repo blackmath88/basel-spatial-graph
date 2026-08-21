@@ -1,4 +1,10 @@
-# Concept
+# Concept — the reference application
+
+The conceptual model behind **15-Minute Basel**, the accessibility map. It predates the
+Spatial Graph Core and is kept because the accessibility reasoning still holds; the relational
+layer that the map became one client of is described in
+[SPATIAL_GRAPH.md](SPATIAL_GRAPH.md) and [SPATIAL_GRAPH_MCP_CONCEPT.md](SPATIAL_GRAPH_MCP_CONCEPT.md).
+Version labels such as *V0.2* below are this project's own milestones, listed in the README.
 
 Traditional proximity asks “how close is it in a straight line?” Walking accessibility asks “how far is it through streets and paths I can use?” A river, railway, fenced site, or sparse crossing can make those answers very different.
 

@@ -15,7 +15,9 @@ typed tool arguments. Structural relations remain persisted; parameterized
 ## Installation and startup
 
 FastMCP 2.14.5 requires Python 3.10 or newer. The reference application still
-supports its existing Python 3.9 environment, so use a separate MCP environment:
+supports its existing Python 3.9 environment, so use a separate MCP environment.
+No data preparation is needed: the repository ships the frozen snapshot the
+tools answer from.
 
 ```bash
 cd basel-spatial-graph-v0
@@ -80,6 +82,11 @@ Dynamic tools return their exact parameters and computation classification.
 Query results are request-scoped and have no persistent IDs; their provenance
 travels inline.
 
+Every answer also carries `provenance.data_state`, saying whether the graph
+behind it is the repository's frozen snapshot, data prepared locally since, or
+synthetic fixtures — with the snapshot's date and the refresh command. A client
+can therefore tell how current an answer is without inspecting the filesystem.
+
 Expected domain failures return a stable error code, explanation and recovery
 metadata such as valid fields, types, relations, modes, operators or functions.
 
@@ -92,9 +99,14 @@ can be added if real client tests show value.
 
 ## Limitations
 
-- No natural-language planner or semantic provenance layer exists yet.
+- No natural-language planner exists yet (P4). Provenance itself is complete
+  (P2.5): field-level classification, a source registry and computation records
+  travel with every answer.
+- Answers describe the frozen snapshot, not live Basel. `data_state` and the
+  snapshot's `valid_until` say so explicitly.
 - Origins are documented neighbourhood representative points, not arbitrary
   coordinates; the map/FastAPI interface remains the arbitrary-point client.
 - Geometry and route itineraries are not exposed by the first MCP tools.
 - Query/result IDs are not persisted.
-- Stdio is the only documented transport in P3.
+- Stdio is the only transport: local subprocess, no remote endpoint and no
+  authentication. Out of scope for this adapter.

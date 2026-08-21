@@ -4,10 +4,14 @@ A second representation of Basel, alongside the routing graphs the reference
 application uses. Those answer *how do I get there*. This one answers *how do
 these things relate* — and can call the first when a question needs both.
 
+The graph ships prepared in the repository's frozen snapshot, so these work in a
+fresh clone with no preparation step:
+
 ```bash
-python -m app.prepare_spatial_graph
 python -m app.spatial_graph.cli describe
 curl localhost:8000/spatial-graph/schema
+
+python -m app.prepare_spatial_graph      # only to rebuild it from refreshed sources
 ```
 
 ## Why it is separate from the routing graphs
