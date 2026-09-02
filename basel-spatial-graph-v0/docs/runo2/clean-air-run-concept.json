@@ -1,0 +1,177 @@
+{
+  "project": {
+    "working_title": "Clean Air Run",
+    "parent_project": "Basel Spatial Graph",
+    "context": "Hack am Rhein — Warm up with the city, 1–15 September 2026",
+    "deadline": "2026-09-15",
+    "core_idea": "Plan a running loop through Basel that minimises measured air pollution exposure, where every number on the screen shows where it came from and every unmeasured street admits it.",
+    "one_line_pitch": "Basel's trams measure the air as they cross the city. This plans your run around what they found.",
+    "submission_requirement": "public GitHub repository"
+  },
+  "product_thesis": {
+    "problem": "A runner breathes roughly ten times as much air per minute as a pedestrian, so route and timing matter more for runners than for anyone else — but nobody plans a run around air quality because the data is not in a usable shape.",
+    "solution": "Join the mobile tram sensor readings to the walking network already in Basel Spatial Graph, score candidate loops by exposure, and let the runner adjust distance, pace and hour of day.",
+    "differentiator": "Not the map and not the route. The join: measured readings, derived network structure, official statistics and a dynamic computation in one answer, each value carrying its own provenance class.",
+    "honesty_principle": "Streets with no measurement render as unmeasured, never as clean. Absence is displayed, not interpolated away.",
+    "boundary": "The system reports what the sensors measured on these streets. It does not claim a route is healthier, and it does not infer personal exposure."
+  },
+  "viability_gate": {
+    "status": "UNRESOLVED — nothing below is committed until this passes",
+    "artifact": "experiments/AIR_VIABILITY.md",
+    "questions": [
+      {
+        "id": "spatial",
+        "question": "Does the median reading differ enough between tram network segments to change a route choice, above sensor noise at the same location?",
+        "fail_action": "No route recommendation is possible. Fall back to a temporal-only or neighbourhood-level finding."
+      },
+      {
+        "id": "temporal",
+        "question": "Does the ranking of segments change between morning and evening, or is it one fixed pattern shifted up and down?",
+        "fail_action": "Drop the hour-of-day strip entirely and simplify the interface."
+      },
+      {
+        "id": "coverage",
+        "question": "What fraction of the walking network lies within 50m of any reading?",
+        "fail_action": "If coverage is very low, the unmeasured rendering becomes the primary finding rather than a caveat."
+      }
+    ],
+    "hypothesis_worth_testing": "Ozone chemistry runs opposite to traffic pollution — NO from traffic scavenges ozone — so busy streets may read lower than parks on a sunny afternoon. If this holds in Basel's data, the counterintuitive result is the headline. Unverified."
+  },
+  "data_sources": {
+    "primary": {
+      "name": "Particulate readings from the roofs of BVB trams",
+      "publisher": "Open Data Basel-Stadt",
+      "measures": ["PM2.5", "PM10"],
+      "rows": 933000,
+      "licence": "CC BY 4.0",
+      "role": "measured",
+      "note": "From the challenge dataset list. Mobile — coverage follows the tram network only."
+    },
+    "already_in_graph": [
+      {"name": "OpenStreetMap walking network", "licence": "ODbL", "role": "derived"},
+      {"name": "Basel-Stadt neighbourhood population statistics", "role": "official"},
+      {"name": "Swiss GTFS timetable", "role": "derived", "use": "tram line geometry for attributing readings to segments"}
+    ],
+    "candidate_additions": {
+      "selection_rule": "Add at most one. The runner does not need four layers and the deadline is short.",
+      "options": [
+        {
+          "dataset": "Smarte Strasse: Luftqualität Vergleichsmessungen (100178)",
+          "why": "Three Nubo microsensors compared against LHA reference instruments at St. Johanns-Platz, Feldbergstrasse and A2 Hard. Gives a published error band for the same sensor class the trams carry.",
+          "adds": "defensibility",
+          "preference": "first choice"
+        },
+        {
+          "dataset": "Baumkataster: Baumbestand (100052)",
+          "why": "Point geometry for every city tree — shade per street segment.",
+          "adds": "usability",
+          "preference": "second choice"
+        },
+        {
+          "dataset": "Smarte Strasse live air quality (100093)",
+          "why": "Live NO2, O3, PM2.5. Ozone is the right pollutant for exercise.",
+          "adds": "currency",
+          "requirement": "Must fall back to a frozen snapshot and label which one is being shown. A live API that fails in October kills the page in front of whoever is judging it."
+        }
+      ]
+    },
+    "rejected": [
+      {"item": "Rhine monitoring station", "reason": "single point, no spatial join into the graph"},
+      {"item": "Cantonal electricity consumption", "reason": "one aggregate series, touches the graph nowhere"},
+      {"item": "Solar potential", "reason": "good dataset, different project"},
+      {"item": "Weather API", "reason": "adds a dependency to tell the runner something visible out the window"},
+      {"item": "city2graph", "reason": "already evaluated twice in docs/CITY2GRAPH.md; reproduces our relations exactly but sets the Python floor to 3.12 and discards our domain vocabulary, which is the part being demonstrated"}
+    ]
+  },
+  "user_experience": {
+    "shape": "One screen. Three decisions.",
+    "decisions": [
+      {
+        "order": 1,
+        "name": "where",
+        "interaction": "Drop a pin at your door, set a distance with a slider.",
+        "output": "Three candidate loops, ranked by exposure, drawn on the map with worst segments coloured."
+      },
+      {
+        "order": 2,
+        "name": "when",
+        "interaction": "24-hour strip under the map.",
+        "output": "How the same loop's exposure shifts by hour.",
+        "conditional_on": "temporal viability question passing"
+      },
+      {
+        "order": 3,
+        "name": "what you are being told",
+        "interaction": "Hover or tap any segment.",
+        "output": "Reading, source dataset, retrieval date, provenance class, error band where known. Unmeasured segments say so."
+      }
+    ],
+    "pace_control": {
+      "interaction": "Pace slider.",
+      "computes": ["expected time from distance and pace", "exposure scaled by duration"],
+      "why_it_matters": "Slower means longer in the air. One line of arithmetic that no other running app does."
+    },
+    "loop_generation": {
+      "approach": "Pick waypoints at radius, route between them, score each candidate by exposure. Return the best three.",
+      "honesty": "These are candidates, not an optimum, and the interface says so.",
+      "rationale": "True circuit optimisation with a distance target is the part most likely to consume the whole build."
+    }
+  },
+  "provenance_model": {
+    "principle": "Ported directly from Basel Spatial Graph: the badge attaches to the value, never to the row or the response.",
+    "classes": {
+      "measured": "A tram sensor read this street segment. Carries dataset ID, retrieval date, reading count, and the reference-comparison error band.",
+      "official": "Retrieved from an authoritative published dataset, unmodified.",
+      "derived": "Persisted deterministic relationship — network structure, snapping, segment attribution. Carries the method.",
+      "dynamic": "Computed at request time from explicit parameters — the loop, the exposure total. Carries the parameter set.",
+      "unmeasured": "No reading exists for this segment. Rendered visibly. Never interpolated."
+    },
+    "display_rule": "A single loop must visibly show several classes side by side. That contrast is the argument.",
+    "visual_weight": "Low. A footnote system, not decoration."
+  },
+  "gpx_export": {
+    "why": "Every running app imports GPX — Strava, Garmin, Komoot, Apple Fitness. No OAuth, no API keys, no terms review.",
+    "extensions_block": {
+      "purpose": "Provenance travels with the file. Importers ignore what they do not understand; anyone opening it in a text editor sees where every number came from.",
+      "per_point": ["reading value", "unit", "source dataset id", "retrieval date", "provenance class"],
+      "per_track": ["total exposure estimate", "pace assumed", "hour of day assumed", "unmeasured share of route", "generator version"]
+    },
+    "readme_note": "State that a portable record format for this is the obvious next step. Credit for the idea without betting the entry on it."
+  },
+  "build_sequence": [
+    {"step": 0, "name": "Viability check", "output": "experiments/AIR_VIABILITY.md", "gate": true},
+    {"step": 1, "name": "Attribute readings to network segments", "output": "measured layer with coverage stats"},
+    {"step": 2, "name": "Exposure scoring on the walking network"},
+    {"step": 3, "name": "Candidate loop generation from pin and distance"},
+    {"step": 4, "name": "Single-page interface — map, distance, pace"},
+    {"step": 5, "name": "Provenance rendering", "note": "gets the most care; this is the entry"},
+    {"step": 6, "name": "Hour-of-day strip", "conditional": true},
+    {"step": 7, "name": "GPX export with extensions"},
+    {"step": 8, "name": "README, attribution page, two sentences on what was found"}
+  ],
+  "explicitly_not_building": [
+    "Strava integration — OAuth application with review and usage terms, days of work, and the judge never logs in",
+    "Google Maps — needs a billable key that cannot sit in a public static page",
+    "weather",
+    "splits, accounts, training plans, and the rest of the running-app furniture",
+    "true circuit optimisation",
+    "an ATProto lexicon",
+    "anything requiring a backend the page cannot run without"
+  ],
+  "success_criteria": [
+    "A visitor drops a pin and gets a loop without reading instructions.",
+    "The visitor discovers one thing they did not expect about their own city.",
+    "Every number on the screen can be traced to a source in one interaction.",
+    "Unmeasured streets are visibly unmeasured.",
+    "The GPX file opens in a real running app.",
+    "The repository is understandable to someone who has never heard of MCP or a graph.",
+    "Someone reading it says 'I did not know that about Basel', not 'nice map'."
+  ],
+  "risks": [
+    {"risk": "The air data has no usable variation", "mitigation": "Step 0 gate. Finding this out in an evening is a good outcome, not a wasted one."},
+    {"risk": "Sensor coverage is too sparse for route choice", "mitigation": "The unmeasured rendering becomes the finding rather than the caveat."},
+    {"risk": "Scope creep back toward a running app", "mitigation": "The explicitly_not_building list is the answer, re-read when tempted."},
+    {"risk": "Loop generation consumes the whole build", "mitigation": "Three candidates, not an optimum. Time-box it."},
+    {"risk": "Reading exposure as a health claim", "mitigation": "Framing stays at what the sensors measured on these streets."}
+  ]
+}
