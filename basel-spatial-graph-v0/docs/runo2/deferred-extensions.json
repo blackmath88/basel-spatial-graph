@@ -1,0 +1,86 @@
+{
+  "purpose": "Ideas that are good but do not fit the 15 September warm-up deadline. Parked here so they are not lost and not built. Each entry states why it was deferred and what would have to be true to revive it.",
+  "parent_project": "Basel Spatial Graph",
+  "written": "2026-09-02",
+  "rule": "Nothing in this file gets built before the warm-up entry ships. If one of these starts to feel urgent mid-build, that is the scope-creep signal, not a new priority.",
+  "extensions": [
+    {
+      "id": "atproto-run-lexicon",
+      "title": "ATProto lexicon for provenance-carrying run records",
+      "idea": "A record schema on the AT Protocol for runs, where the route carries its provenance with it — self-owned data on a public, portable running platform rather than a closed silo.",
+      "why_it_is_good": "It is the correct long-form answer to the same question GPX extensions answer cheaply: where should a provenance-carrying record actually live? Portable identity plus portable data is the structurally right home for it.",
+      "why_deferred": "Designing a record schema for a protocol requires reading the current Lexicon specification properly rather than working from memory. That is a research task, not a build task, and eleven days of it would come directly out of the provenance layer, which is the part that matters for this entry.",
+      "cheap_version_shipping_now": "Per-point provenance written into the GPX <extensions> block. Importers ignore what they do not understand; a text editor reveals everything.",
+      "revive_when": [
+        "the warm-up entry has shipped",
+        "there is a reason to want records outside a single page",
+        "there is time to read the Lexicon spec rather than approximate it"
+      ],
+      "first_step_when_revived": "Read the current Lexicon spec. Then write one record type by hand and see whether the provenance model survives contact with it."
+    },
+    {
+      "id": "strava-integration",
+      "title": "Strava OAuth integration",
+      "why_deferred": "An OAuth application with a review process and usage terms that need reading carefully. Days of work, and nobody judging the entry will log in.",
+      "cheap_version_shipping_now": "GPX download. Opens in Strava, Garmin, Komoot and Apple Fitness with no account, no key and no terms review.",
+      "revive_when": ["there are real users who want their runs synced, not judges who want to look at a page"]
+    },
+    {
+      "id": "google-maps",
+      "title": "Google Maps rendering and directions",
+      "why_deferred": "Requires a billable API key, which cannot sit in a public static page without someone else spending the money.",
+      "cheap_version_shipping_now": "The existing map layer and the routing already in the repo.",
+      "revive_when": ["never, for a public static artifact"]
+    },
+    {
+      "id": "weather-layer",
+      "title": "Live weather in the run planner",
+      "why_deferred": "Adds an external dependency in order to tell the runner something they can see out the window. Wind and inversion effects on pollution dispersion would be a real contribution, but that is a modelling project, not a display field.",
+      "revive_when": ["the question becomes why the readings differ, not what they are"],
+      "note": "There is apparently an existing weather build with connectors already set up. Worth locating before rebuilding anything here."
+    },
+    {
+      "id": "running-app-furniture",
+      "title": "Splits, training plans, accounts, history",
+      "why_deferred": "Every running app already has these. Building them makes the entry indistinguishable from a weekend project, and consumes exactly the time the differentiator needs.",
+      "revive_when": ["this stops being a demonstration and becomes a product someone asked for"]
+    },
+    {
+      "id": "true-loop-optimisation",
+      "title": "Optimal circuit generation with a distance target",
+      "why_deferred": "A genuinely harder problem than shortest path, and the single item most likely to consume the entire build window.",
+      "cheap_version_shipping_now": "Waypoints at radius, route between them, score and return the best three. Labelled as candidates rather than an optimum.",
+      "revive_when": ["the three-candidate version demonstrably produces bad loops"]
+    },
+    {
+      "id": "multi-dataset-dashboard",
+      "title": "Combining all five challenge datasets",
+      "why_deferred": "The five share no join key beyond being Basel. The result would be five panels side by side, which is a dashboard, which is the most common and least memorable thing at any hackathon.",
+      "revive_when": ["never in this form; individual pairings with a real key are a different question"]
+    },
+    {
+      "id": "city2graph-adoption",
+      "title": "Rebuild graph construction on city2graph",
+      "why_deferred": "Already evaluated twice and documented in docs/CITY2GRAPH.md. It reproduces the structural relations exactly, but sets the project's Python floor to 3.12 against a 3.9 repo, replaces about 60 lines of verified shapely, and returns a vocabulary that discards the domain semantics and provenance the project exists to demonstrate.",
+      "revive_when": [
+        "a tessellation or morphological-graph milestone",
+        "proximity layers needed as first-class relations",
+        "a PyTorch Geometric export",
+        "a Python upgrade already paid for by other reasons"
+      ]
+    },
+    {
+      "id": "basel-evidence",
+      "title": "Basel Evidence — parliamentary Vorstösse joined to city data",
+      "why_deferred": "A six-phase pipeline with a daily cron, an LLM extraction layer and a publication site, against a brief that says an evening is enough. It also touches none of the five challenge datasets, and publishing auto-generated evidence attached to a named politician's motion within thirteen days is where one wrong number costs more credibility than the entry earns.",
+      "revive_when": ["October — the main Hack am Rhein event, where the scope actually fits"],
+      "status": "alive, not cancelled"
+    }
+  ],
+  "still_open_from_the_main_roadmap": [
+    {"item": "P4 natural-language planning", "note": "deliberately deferred; adds nothing the thesis rests on"},
+    {"item": "Ist-Daten vs. schedule reliability", "note": "strongest technical direction, blocked on a data sample from the transit-quality contact"},
+    {"item": "Self-contained HTML portfolio artifact", "note": "the warm-up entry may partly serve this purpose"},
+    {"item": "Written piece on horizontal vs. vertical layering", "note": "unblocked, not a code task, still unwritten"}
+  ]
+}
