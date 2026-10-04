@@ -1,0 +1,42 @@
+name: Deploy 15-Minute Basel to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: HTTPS origin of the deployed Python routing backend
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Export the existing interactive map
+        run: python scripts/build_pages.py
+        env:
+          BASEL_API_URL: ${{ inputs.backend_url || vars.BASEL_API_URL }}
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages-dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

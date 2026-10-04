@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: basel-reachability
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: BASEL_CORS_ORIGINS
+        value: https://blackmath88.github.io

@@ -3,6 +3,7 @@ import os
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from typing import List, Optional
 
@@ -137,6 +138,14 @@ def parse_categories(value: Optional[str]) -> Optional[List[ServiceCategory]]:
     return categories or None
 
 app = FastAPI(title="15-Minute Basel Spatial Graph", version="0.2.0")
+pages_origins = [origin.strip() for origin in os.getenv("BASEL_CORS_ORIGINS", "").split(",") if origin.strip()]
+if pages_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=pages_origins,
+        allow_methods=["GET"],
+        allow_headers=[],
+    )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
