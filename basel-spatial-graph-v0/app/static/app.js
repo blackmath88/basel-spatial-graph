@@ -44,7 +44,7 @@ const departureValue = () => ($('departure').value || '').trim() || undefined;
 
 const $ = id => document.getElementById(id);
 const get = async url => {
-  const response = await fetch(url);
+  const response = await fetch((window.BASEL_API_BASE || '') + url);
   const body = await response.json().catch(() => ({ message: response.statusText }));
   if (!response.ok) throw new Error(body.message || body.detail || 'Request failed');
   return body;
@@ -468,7 +468,7 @@ async function renderDataCard() {
       <details style="margin-top:8px"><summary class="small">${status.warning_count} data-quality warning(s)</summary>
       <div style="margin-top:6px">${warnings || '<span class="muted small">none</span>'}</div></details>
       <p class="muted small" style="margin:8px 0 0">Prepared ${escapeHtml(status.generated_at || 'unknown')} ·
-      full report at <a href="/data/status">/data/status</a></p>`;
+      full report at <a href="${escapeAttr(window.BASEL_API_BASE || '')}/data/status">/data/status</a></p>`;
   } catch (error) {
     $('data-card').innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
   }
