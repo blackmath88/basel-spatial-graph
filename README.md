@@ -1,6 +1,18 @@
+<!-- BEGIN public-repo-header -->
+<div align="center">
+
 # Basel Spatial Graph
 
-### Ask a city question. Follow the evidence.
+**Ask a city question. Follow the evidence.**
+
+<a href="https://github.com/blackmath88/basel-spatial-graph/actions/workflows/deploy-pages.yml"><img alt="Pages" src="https://github.com/blackmath88/basel-spatial-graph/actions/workflows/deploy-pages.yml/badge.svg?branch=main"></a>
+<a href="https://github.com/blackmath88/basel-spatial-graph"><img alt="Primary language: Python" src="https://img.shields.io/badge/language-Python-526078?style=flat"></a>
+<a href="https://github.com/blackmath88/basel-spatial-graph/tree/main/docs"><img alt="Documentation" src="https://img.shields.io/badge/docs-guide-16796f?style=flat"></a>
+<a href="https://github.com/blackmath88/basel-spatial-graph/blob/main/LICENSE"><img alt="License: see file" src="https://img.shields.io/badge/license-see%20file-737373?style=flat"></a>
+<a href="https://github.com/blackmath88/basel-spatial-graph/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/blackmath88/basel-spatial-graph?style=flat&amp;color=737373"></a>
+
+</div>
+<!-- END public-repo-header -->
 
 Explore Basel's streets, services, neighbourhoods and public transport through one typed graph. Query it from a map, an HTTP API, a command line or a local MCP client—with sources and computation methods attached to the answers.
 
