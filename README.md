@@ -1,60 +1,83 @@
 # Basel Spatial Graph
 
-Heterogeneous public city data — OpenStreetMap street networks, cantonal open
-government datasets, official population statistics and the Swiss GTFS
-timetable — joined once into a **typed relational graph of Basel**, queryable
-through a structured API and an MCP adapter, where **every answer carries its
-own provenance**.
+### Ask a city question. Follow the evidence.
 
-> The join is precomputed and correct, and the answer carries its own provenance.
+Explore Basel's streets, services, neighbourhoods and public transport through one typed graph. Query it from a map, an HTTP API, a command line or a local MCP client—with sources and computation methods attached to the answers.
 
-Four sources that normally live in four incompatible shapes are normalized,
-snapped and related ahead of time. Traversal, filtering, grouping and
-aggregation then run over typed relations, and anything that depends on a
-travel mode, a budget or a departure time is computed at request time by
-deterministic routing engines — never stored, never averaged away, and always
-labelled as a live computation rather than a stored fact.
+**[Quick start](#run-locally) · [Query API](basel-spatial-graph-v0/docs/QUERY_API.md) · [MCP](basel-spatial-graph-v0/docs/MCP.md) · [Data attribution](ATTRIBUTION.md)**
+
+![Basel Spatial Graph architecture: public data sources become a prepared graph; routing computes parameter-dependent answers, exposed through a map, API, CLI and MCP.](.github/media/architecture.svg)
+
+*Architecture overview, not a screenshot. The map is one client of the shared graph and routing core.*
+
+> **Research prototype with a real, frozen dataset.** Sources were retrieved on **20 August 2026**. The shipped timetable ends on **12 December 2026**. Results describe that snapshot, not current city conditions.
+
+## What can you ask?
+
+| Question | What contributes to the answer |
+|---|---|
+| What can I reach within 15 minutes? | Street networks, service locations and the selected travel mode |
+| How does walking compare with cycling or transit? | Separate network models; transit includes departure time and waiting |
+| Which neighbourhoods combine many children with weaker service access? | Official population statistics, graph relations and routing calculations |
+| Where did this number come from? | Source identifiers, retrieval metadata and method-specific provenance |
+
+The reference application, **15-Minute Basel**, lets you choose a location, mode and time budget. The same core also supports structured queries and agent access.
+
+## Run locally
+
+Use **Python 3.10+** for a common starting point; the optional MCP adapter has additional dependencies.
 
 ```bash
-git clone <this repo>
+git clone https://github.com/blackmath88/basel-spatial-graph.git
 cd basel-spatial-graph/basel-spatial-graph-v0
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1
 ```
 
-That is the whole setup. The repository ships a **frozen snapshot of real
-Basel data** (~8 MB in the clone), so there is no preparation step and the
-server never opens a socket.
+On Windows, activate with `.venv\Scripts\activate` instead. Open **http://127.0.0.1:8000** for the map or **http://127.0.0.1:8000/docs** for the API explorer.
+
+The prepared data are committed: no import or refresh is needed. The browser map loads external map assets; API and CLI queries use the local snapshot.
+
+In a second terminal with the same environment activated:
 
 ```bash
 python -m app.spatial_graph.cli ask q6_children_underserved --table
 ```
 
-```text
-Which neighbourhoods with many children have below-median access to both
-pharmacies and public transport?
+This returns a neighbourhood table combining population, pharmacy access and transit stops. Consult the response's provenance before interpreting or comparing results.
 
-  name          children   child_share   pharmacies   nearest   transit stops
-  St. Alban         2237         17.5%            1    12.0 min             5
-  Bruderholz        1994         20.5%            1     4.7 min            11
-  Hirzbrunnen       1914         19.1%            2     8.7 min            14
-```
+## Three kinds of evidence
 
-Official population statistics, structural graph relations and a live routing
-computation in one answer — which states which part came from where.
+| Kind | Example | Interpretation |
+|---|---|---|
+| Source fact | Population figure from a cantonal dataset | Preserve the source and reference year |
+| Derived relation | A service attached to a street-network node | Inspect the method and snapping quality |
+| Request-time calculation | Travel time under a selected mode and budget | Depends on those parameters and the frozen inputs |
 
-**15-Minute Basel**, the interactive accessibility map, is the reference
-application: one client of the same core, not the product itself.
+Request-time computation does **not** mean live data. Missing services, imperfect snapping and simplified travel models can change the apparent accessibility of a place.
 
----
+## Know the boundaries
 
-- **[Full documentation and quick start →](basel-spatial-graph-v0/README.md)**
-- [Data sources and attribution](ATTRIBUTION.md) — OpenStreetMap (ODbL 1.0),
-  data.bs.ch (CC BY 3.0 CH), opentransportdata.swiss
-- [Licence](LICENSE) — MIT for the code; the committed data keep their upstream licences
+- Coverage centres on Basel-Stadt; one snapshot is not a time series or a multi-city comparison.
+- Walking and cycling use simplified models. There is no step-free routing or opening-hours model.
+- Transit uses a static timetable, without live delays or disruptions.
+- Neighbourhood summaries use representative origins, not population-weighted household access.
+- This is an exploratory model, not an official urban quality score or a journey-planning guarantee.
 
-The committed snapshot describes Basel as retrieved on **2026-08-20**. It is
-real, and it is not current; the shipped timetable's last service date is
-**2026-12-12**. The application reports at all times whether it is running on
-the frozen snapshot, on locally prepared data, or on synthetic fixtures.
+Read the [full limitations](basel-spatial-graph-v0/README.md#known-limitations) before using results for decisions.
+
+## Documentation and contribution
+
+| Task | Guide |
+|---|---|
+| Understand the graph | [Spatial graph](basel-spatial-graph-v0/docs/SPATIAL_GRAPH.md) |
+| Query, group and aggregate | [Query reference](basel-spatial-graph-v0/docs/QUERY_API.md) |
+| Connect an agent locally | [MCP setup](basel-spatial-graph-v0/docs/MCP.md) |
+| Inspect modes, data and refresh procedures | [Full project guide](basel-spatial-graph-v0/README.md) |
+| Make a change | [Contributing](CONTRIBUTING.md) |
+
+Run `pytest` from `basel-spatial-graph-v0/` after installing the requirements. Optional preparation and MCP dependencies enable additional tests; report skips explicitly.
+
+**License:** [MIT for code](LICENSE). Committed datasets retain their [upstream licenses and attribution](ATTRIBUTION.md).

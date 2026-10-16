@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
+<title id="title">Basel Spatial Graph: sources, graph, computation, interfaces</title><desc id="desc">OpenStreetMap, Basel open data, population statistics and Swiss GTFS form a prepared graph. Queries combine stored facts and relations with request-time routing. Four interfaces expose the same core: map, API, CLI and local MCP.</desc>
+<rect width="1200" height="480" rx="12" fill="#f4f5f1"/>
+<g font-family="Arial,Helvetica,sans-serif" fill="#17272b">
+<text x="44" y="48" font-size="15" letter-spacing="3">BASEL SPATIAL GRAPH</text>
+<text x="44" y="96" font-size="32" font-weight="700">One city. Connected evidence.</text>
+<g stroke="#c6d2ce" fill="#fff"><rect x="44" y="150" width="300" height="240" rx="10"/><rect x="408" y="150" width="348" height="240" rx="10"/><rect x="820" y="150" width="336" height="240" rx="10"/></g>
+<path d="M344 270H398M756 270H810" stroke="#267b70" stroke-width="3"/><path d="m389 263 9 7-9 7m412-14 9 7-9 7" fill="none" stroke="#267b70" stroke-width="3"/>
+<text x="68" y="187" font-size="13" fill="#267b70" letter-spacing="2">01 / PREPARED SOURCES</text>
+<text x="68" y="230" font-size="21">Street networks</text><text x="68" y="269" font-size="21">Services + neighbourhoods</text><text x="68" y="308" font-size="21">Population statistics</text><text x="68" y="347" font-size="21">Public transport timetable</text>
+<text x="432" y="187" font-size="13" fill="#267b70" letter-spacing="2">02 / SHARED CORE</text><text x="432" y="232" font-size="25" font-weight="700">Typed graph</text><text x="432" y="261" font-size="17">Source facts + derived relations</text><path d="M432 282H730" stroke="#dce3df"/><text x="432" y="318" font-size="25" font-weight="700">Routing engines</text><text x="432" y="348" font-size="17">Mode, budget + departure time</text>
+<text x="844" y="187" font-size="13" fill="#267b70" letter-spacing="2">03 / WAYS TO EXPLORE</text><text x="844" y="230" font-size="21">15-Minute Basel map</text><text x="844" y="269" font-size="21">Structured HTTP API</text><text x="844" y="308" font-size="21">Command-line queries</text><text x="844" y="347" font-size="21">Local MCP adapter</text>
+<text x="44" y="440" font-size="17" fill="#536863">Frozen inputs. Parameter-dependent calculations. Traceable answers.</text></g></svg>

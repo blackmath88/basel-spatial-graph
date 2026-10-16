@@ -1,0 +1,29 @@
+name: Problem or documentation correction
+description: Report a reproducible problem, unclear instruction or unsupported claim.
+title: ""
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What were you trying to do?
+      description: Include the page, command or source record. Do not include sensitive data.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps or evidence
+      description: Smallest reproduction, or the exact wording and supporting source for a documentation concern.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and observed result
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Revision and environment
+      placeholder: Commit or version, OS, runtime or browser if relevant
